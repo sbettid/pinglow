@@ -1,23 +1,21 @@
-use std::sync::{Arc, Mutex};
-
 use check::{Check, CheckResult};
 use env_logger;
 use log::info;
 use tokio::sync::mpsc;
-use worker::run_check_loop;
 
-use kube::{runtime::controller::Action, Api, Client};
+use kube::{Api, Client};
 
 use crate::{
     check::{RunnableCheck, Script},
     config::{get_config_from_env, PinglowConfig},
     error::ReconcileError,
+    runner::scheduler_loop,
 };
 
 mod check;
 mod config;
 mod error;
-mod worker;
+mod runner;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -30,14 +28,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load all the available checks
     let checks = load_checks(&config).await?;
 
+    // Prepare the channel to send back the results
     let (result_tx, mut result_rx) = mpsc::channel::<CheckResult>(100);
 
-    for check in checks {
-        let tx = result_tx.clone();
+    // Spawn the task which will schedule the checks in a continuous way
+    tokio::spawn(scheduler_loop(checks, result_tx));
 
-        tokio::spawn(run_check_loop(check, tx));
-    }
-
+    // Wait for the results and log them
     while let Some(result) = result_rx.recv().await {
         info!(
             "[Result] {} @ {}: {:?}",
@@ -90,8 +87,11 @@ async fn load_checks(config: &PinglowConfig) -> Result<Vec<RunnableCheck>, Recon
             check_name,
         };
 
+        // Add it to our queue of checks
         runnable_checks.push(runnable_check);
     }
+
+    info!("Loaded {:?} checks", runnable_checks.len());
 
     Ok(runnable_checks)
 }

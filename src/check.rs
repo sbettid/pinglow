@@ -1,8 +1,9 @@
-use std::collections::BTreeMap;
+use std::{cmp::Ordering, collections::BTreeMap};
 
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use tokio::time::Instant;
 
 #[derive(Debug)]
 pub enum CheckResultStatus {
@@ -64,4 +65,29 @@ pub struct RunnableCheck {
     pub interval: u64,
     pub language: String,
     pub check_name: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ScheduledCheck {
+    pub check: RunnableCheck,
+    pub next_run: Instant,
+}
+
+// Min-heap (invert the comparison)
+impl PartialEq for ScheduledCheck {
+    fn eq(&self, other: &Self) -> bool {
+        self.next_run == other.next_run
+    }
+}
+impl Eq for ScheduledCheck {}
+
+impl PartialOrd for ScheduledCheck {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(other.next_run.cmp(&self.next_run)) // reverse
+    }
+}
+impl Ord for ScheduledCheck {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other.next_run.cmp(&self.next_run) // reverse
+    }
 }
