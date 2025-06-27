@@ -1,5 +1,5 @@
 use check::{Check, CheckResult};
-use env_logger;
+use env_logger::{self, Builder};
 use log::info;
 use tokio::sync::mpsc;
 
@@ -20,7 +20,7 @@ mod runner;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize the logger
-    env_logger::init();
+    Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     // Get the configuration
     let config = get_config_from_env();
@@ -32,13 +32,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (result_tx, mut result_rx) = mpsc::channel::<CheckResult>(100);
 
     // Spawn the task which will schedule the checks in a continuous way
-    tokio::spawn(scheduler_loop(checks, result_tx));
+    tokio::spawn(scheduler_loop(checks, result_tx, config.target_namespace));
 
     // Wait for the results and log them
     while let Some(result) = result_rx.recv().await {
         info!(
-            "[Result] {} @ {}: {:?}",
-            result.check_name, result.timestamp, result.status
+            "[Result] {} @ {}: {:?}: {:?}",
+            result.check_name, result.timestamp, result.status, result.output
         );
     }
 
