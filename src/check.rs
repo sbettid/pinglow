@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, collections::BTreeMap};
+use std::{cmp::Ordering, fmt::Display};
 
 use kube::CustomResource;
 use schemars::JsonSchema;
@@ -20,6 +20,23 @@ impl From<i32> for CheckResultStatus {
             1 => CheckResultStatus::Warning,
             2 => CheckResultStatus::Critical,
             _ => CheckResultStatus::CheckError,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub enum ScriptLanguage {
+    #[serde(rename = "Python")]
+    Python,
+    #[serde(rename = "Bash")]
+    Bash,
+}
+
+impl Display for ScriptLanguage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ScriptLanguage::Python => write!(f, "python"),
+            ScriptLanguage::Bash => write!(f, "bash"),
         }
     }
 }
@@ -58,8 +75,8 @@ pub fn map_command_exit_code_to_check_result(exit_code: Option<i32>) -> CheckRes
 #[allow(non_snake_case)]
 pub struct CheckSpec {
     pub scriptRef: String,
-    pub config: BTreeMap<String, String>,
     pub interval: u64,
+    pub secretRefs: Option<Vec<String>>,
 }
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
@@ -70,16 +87,19 @@ pub struct CheckSpec {
     namespaced
 )]
 pub struct ScriptSpec {
-    pub language: String,
+    pub language: ScriptLanguage,
     pub content: String,
+    pub python_requirements: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug)]
 pub struct RunnableCheck {
     pub script: String,
     pub interval: u64,
-    pub language: String,
+    pub language: ScriptLanguage,
     pub check_name: String,
+    pub secrets_refs: Option<Vec<String>>,
+    pub python_requirements: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug)]

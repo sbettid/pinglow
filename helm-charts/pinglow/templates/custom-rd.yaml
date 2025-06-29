@@ -16,18 +16,18 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
-          required:
-            - language
-            - content
           properties:
             spec:
               type: object
+              required:
+                - language
+                - content
               properties:
                 language:
                   type: string
                   enum:
-                    - python
-                    - bash
+                    - Python
+                    - Bash
                 content:
                   type: string
                 python_requirements:
@@ -67,7 +67,7 @@ spec:
                 interval:
                   type: integer
                   description: "Interval at which to run the check, in seconds"
-                config:
-                  type: object
-                  additionalProperties:
+                secretRefs:
+                  type: array
+                  items:
                     type: string

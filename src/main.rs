@@ -15,6 +15,7 @@ use crate::{
 mod check;
 mod config;
 mod error;
+mod job_helper;
 mod runner;
 
 #[tokio::main]
@@ -37,8 +38,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Wait for the results and log them
     while let Some(result) = result_rx.recv().await {
         info!(
-            "[Result] {} @ {:?}: {:?}: {:?}",
-            result.check_name, result.timestamp, result.status, result.output
+            "[Result] {} @ {}: {:?}: {:?}",
+            result.check_name,
+            result.timestamp.unwrap_or("".to_string()),
+            result.status,
+            result.output
         );
     }
 
@@ -79,12 +83,18 @@ async fn load_checks(config: &PinglowConfig) -> Result<Vec<RunnableCheck>, Recon
             .await
             .map_err(|_| ReconcileError::ScriptNotFound(script_name.clone()))?;
 
+        let secrets_refs = &check.spec.secretRefs;
+
+        let python_requirements = &script.spec.python_requirements;
+
         // Build the runnable check object
         let runnable_check = RunnableCheck {
             script: script.spec.content,
             interval: check.spec.interval,
             language: script.spec.language,
             check_name,
+            secrets_refs: secrets_refs.clone(),
+            python_requirements: python_requirements.clone(),
         };
 
         // Add it to our queue of checks
