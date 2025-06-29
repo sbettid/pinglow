@@ -28,7 +28,22 @@ pub struct CheckResult {
     pub check_name: String,
     pub output: String,
     pub status: CheckResultStatus,
-    pub timestamp: String,
+    pub timestamp: Option<String>,
+}
+
+impl CheckResult {
+    pub fn set_check_result_timestamp(&mut self, timestamp: String) {
+        self.timestamp = Some(timestamp);
+    }
+
+    pub fn map_to_check_error(check_name: &String, error_message: String) -> Self {
+        Self {
+            check_name: check_name.to_string(),
+            output: error_message,
+            status: CheckResultStatus::CheckError,
+            timestamp: None,
+        }
+    }
 }
 
 pub fn map_command_exit_code_to_check_result(exit_code: Option<i32>) -> CheckResultStatus {
@@ -40,8 +55,8 @@ pub fn map_command_exit_code_to_check_result(exit_code: Option<i32>) -> CheckRes
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[kube(group = "pinglow.io", version = "v1alpha1", kind = "Check", namespaced)]
+#[allow(non_snake_case)]
 pub struct CheckSpec {
-    #[allow(non_snake_case)]
     pub scriptRef: String,
     pub config: BTreeMap<String, String>,
     pub interval: u64,

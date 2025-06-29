@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Wait for the results and log them
     while let Some(result) = result_rx.recv().await {
         info!(
-            "[Result] {} @ {}: {:?}: {:?}",
+            "[Result] {} @ {:?}: {:?}: {:?}",
             result.check_name, result.timestamp, result.status, result.output
         );
     }
@@ -91,7 +91,7 @@ async fn load_checks(config: &PinglowConfig) -> Result<Vec<RunnableCheck>, Recon
         runnable_checks.push(runnable_check);
     }
 
-    info!("Loaded {:?} checks", runnable_checks.len());
+    info!("Loaded {:?} check(s)", runnable_checks.len());
 
     Ok(runnable_checks)
 }
