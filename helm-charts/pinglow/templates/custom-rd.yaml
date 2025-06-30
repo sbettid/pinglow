@@ -1,0 +1,73 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: scripts.{{ .Release.Name }}.io
+spec:
+  group: {{ .Release.Name }}.io
+  names:
+    plural: scripts
+    singular: script
+    kind: Script
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - language
+                - content
+              properties:
+                language:
+                  type: string
+                  enum:
+                    - Python
+                    - Bash
+                content:
+                  type: string
+                python_requirements:
+                  type: array
+                  items:
+                    type: string
+                  description: |
+                    Optional pip-style requirements. Only used if language is 'python'
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: checks.{{ .Release.Name }}.io
+spec:
+  group: {{ .Release.Name }}.io
+  names:
+    plural: checks
+    singular: check
+    kind: Check
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required:
+                - scriptRef
+                - interval
+              properties:
+                scriptRef:
+                  type: string
+                interval:
+                  type: integer
+                  description: "Interval at which to run the check, in seconds"
+                secretRefs:
+                  type: array
+                  items:
+                    type: string
