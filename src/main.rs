@@ -105,3 +105,18 @@ async fn load_checks(config: &PinglowConfig) -> Result<Vec<RunnableCheck>, Recon
 
     Ok(runnable_checks)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+
+    #[test]
+    fn check_formatting() {
+        let status = Command::new("cargo")
+            .args(["fmt", "--all", "--", "--check"])
+            .status()
+            .expect("failed to run cargo fmt");
+
+        assert!(status.success(), "Code is not properly formatted");
+    }
+}

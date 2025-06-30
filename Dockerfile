@@ -15,5 +15,13 @@ FROM debian:bullseye-slim
 
 COPY --from=rust-builder /app/target/release/pinglow /usr/local/bin/pinglow
 
+RUN addgroup --system pinglow && adduser --system --ingroup pinglow pinglow
+
+RUN chown pinglow:pinglow /usr/local/bin/pinglow && chmod 755 /usr/local/bin/pinglow
+
+USER pinglow
+
+WORKDIR /home/pinglow
+
 # Run the binary
 CMD ["pinglow"]
