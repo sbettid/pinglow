@@ -2,9 +2,7 @@ use check::{map_command_exit_code_to_check_result, CheckResult};
 use chrono::prelude::*;
 use chrono::Local;
 use k8s_openapi::api::batch::v1::Job;
-use k8s_openapi::api::core::v1::EnvFromSource;
 use k8s_openapi::api::core::v1::Pod;
-use k8s_openapi::api::core::v1::SecretEnvSource;
 use kube::api::DeleteParams;
 use kube::api::ListParams;
 use kube::api::PostParams;
@@ -21,7 +19,9 @@ use tokio::{
 };
 
 use crate::check::{self, RunnableCheck, ScheduledCheck};
-use crate::job_helper::is_job_finished;
+use crate::job::build_bash_job;
+use crate::job::build_python_job;
+use crate::job::is_job_finished;
 
 /**
  * This function continuously schedule checks based on the interval
@@ -207,126 +207,4 @@ async fn run_check_as_kube_job(
         status: map_command_exit_code_to_check_result(*exit_code),
         timestamp: None,
     })
-}
-
-/**
- * This function takes the script Bash code and creates a kubernetes job to run it
- */
-fn build_bash_job(job_name: &str, check_script: &str, secrets_refs: Option<Vec<String>>) -> Job {
-    // Escape newlines and quotes to run inline in bash -c
-    let escaped_script = check_script
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("; ");
-
-    let escaped_script = format!("set -euo pipefail; {}", escaped_script);
-
-    // Create the secrets object, if needed
-    let env_from: Option<Vec<EnvFromSource>> = secrets_refs.map(|secret_names| {
-        secret_names
-            .into_iter()
-            .map(|secret_name| EnvFromSource {
-                secret_ref: Some(SecretEnvSource {
-                    name: Some(secret_name),
-                    optional: Some(false), // set true if you want optional secrets
-                }),
-                ..Default::default()
-            })
-            .collect()
-    });
-
-    // Build the Job object
-    Job {
-        metadata: kube::api::ObjectMeta {
-            name: Some(job_name.to_owned()),
-            ..Default::default()
-        },
-        spec: Some(k8s_openapi::api::batch::v1::JobSpec {
-            ttl_seconds_after_finished: Some(60),
-            template: k8s_openapi::api::core::v1::PodTemplateSpec {
-                spec: Some(k8s_openapi::api::core::v1::PodSpec {
-                    containers: vec![k8s_openapi::api::core::v1::Container {
-                        name: "bash-script".to_string(),
-                        image: Some("bash:latest".into()),
-                        command: Some(vec!["bash".into(), "-c".into(), escaped_script]),
-                        env_from,
-                        ..Default::default()
-                    }],
-                    restart_policy: Some("Never".into()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-            backoff_limit: Some(0),
-            ..Default::default()
-        }),
-        ..Default::default()
-    }
-}
-
-// This function taks the script Python code and creates a Kubernetes job to run it
-fn build_python_job(
-    job_name: &str,
-    check_script: &str,
-    secrets_refs: Option<Vec<String>>,
-    requirements: Option<Vec<String>>,
-) -> Job {
-    let pip_command = if let Some(requirements) = requirements {
-        let reqs = requirements.join(" ");
-
-        format!("pip install {}", reqs)
-    } else {
-        "".to_string()
-    };
-
-    let command = format!(
-        "{pip} > pip.log 2>&1 || (cat pip.log && exit 4) && python <<'EOF'\n{code}\nEOF",
-        pip = pip_command,
-        code = check_script.trim()
-    );
-
-    // Create the secrets object, if needed
-    let env_from: Option<Vec<EnvFromSource>> = secrets_refs.map(|secret_names| {
-        secret_names
-            .into_iter()
-            .map(|secret_name| EnvFromSource {
-                secret_ref: Some(SecretEnvSource {
-                    name: Some(secret_name),
-                    optional: Some(false), // set true if you want optional secrets
-                }),
-                ..Default::default()
-            })
-            .collect()
-    });
-
-    // Build the Job object
-    Job {
-        metadata: kube::api::ObjectMeta {
-            name: Some(job_name.to_owned()),
-            ..Default::default()
-        },
-        spec: Some(k8s_openapi::api::batch::v1::JobSpec {
-            ttl_seconds_after_finished: Some(60),
-            template: k8s_openapi::api::core::v1::PodTemplateSpec {
-                spec: Some(k8s_openapi::api::core::v1::PodSpec {
-                    containers: vec![k8s_openapi::api::core::v1::Container {
-                        name: "python-script".to_string(),
-                        image: Some("python:3.11-slim".into()),
-                        command: Some(vec!["bash".into(), "-c".into()]),
-                        args: Some(vec![command]),
-                        env_from,
-                        ..Default::default()
-                    }],
-                    restart_policy: Some("Never".into()),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-            backoff_limit: Some(0),
-            ..Default::default()
-        }),
-        ..Default::default()
-    }
 }
