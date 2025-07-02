@@ -15,7 +15,7 @@ use crate::{
 mod check;
 mod config;
 mod error;
-mod job_helper;
+mod job;
 mod runner;
 
 #[tokio::main]
