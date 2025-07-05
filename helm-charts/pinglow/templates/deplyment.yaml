@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pinglow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pinglow
+  template:
+    metadata:
+      labels:
+        app: pinglow
+    spec:
+      serviceAccountName: pinglow
+      containers:
+        - name: pinglow
+          image: ghcr.io/sbettid/pinglow:v0.1.1
+      imagePullSecrets:
+        - name: pinglow-pull
