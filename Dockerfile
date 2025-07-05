@@ -1,7 +1,7 @@
 ################################# Build Container ###############################
 
 # Use Rust official image for build stage
-FROM rust:1.81-bullseye as rust-builder
+FROM rust:1.88-bullseye as rust-builder
 
 WORKDIR /app
 

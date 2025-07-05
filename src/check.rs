@@ -4,6 +4,7 @@ use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tokio::time::Instant;
+use tokio_postgres::Client;
 
 #[derive(Debug)]
 pub enum CheckResultStatus {
@@ -20,6 +21,17 @@ impl From<i32> for CheckResultStatus {
             1 => CheckResultStatus::Warning,
             2 => CheckResultStatus::Critical,
             _ => CheckResultStatus::CheckError,
+        }
+    }
+}
+
+impl CheckResultStatus {
+    pub fn to_number(&self) -> i8 {
+        match self {
+            CheckResultStatus::Ok => 0,
+            CheckResultStatus::Warning => 1,
+            CheckResultStatus::Critical => 2,
+            CheckResultStatus::CheckError => 3,
         }
     }
 }
@@ -59,6 +71,24 @@ impl CheckResult {
             output: error_message,
             status: CheckResultStatus::CheckError,
             timestamp: None,
+        }
+    }
+
+    pub async fn write_to_db(&self, client: &Client) -> Result<u64, tokio_postgres::Error> {
+        if let Some(timestamp) = &self.timestamp {
+            client
+            .execute(
+                "INSERT INTO check_result (timestamp, check_name, status, output) VALUES ($1, $2, $3, $4)",
+                &[timestamp, &self.check_name, &self.status.to_number(), &self.output],
+            )
+            .await
+        } else {
+            client
+                .execute(
+                    "INSERT INTO check_result (check_name, status, output) VALUES ($1, $2, $3)",
+                    &[&self.check_name, &self.status.to_number(), &self.output],
+                )
+                .await
         }
     }
 }

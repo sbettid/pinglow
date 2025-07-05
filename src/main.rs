@@ -1,9 +1,10 @@
 use check::{Check, CheckResult};
 use env_logger::{self, Builder};
-use log::info;
+use log::{error, info};
 use tokio::sync::mpsc;
 
 use kube::{Api, Client};
+use tokio_postgres::NoTls;
 
 use crate::{
     check::{RunnableCheck, Script},
@@ -18,6 +19,11 @@ mod error;
 mod job;
 mod runner;
 
+mod embedded {
+    use refinery::embed_migrations;
+    embed_migrations!("./db_migrations");
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize the logger
@@ -25,6 +31,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Get the configuration
     let config = get_config_from_env();
+
+    // Connect to the DB
+    let (mut client, connection) = tokio_postgres::connect(
+        &format!(
+            "host={} user={} password={} dbname={}",
+            config.db_host, config.db_user, config.db_user_password, config.db
+        ),
+        NoTls,
+    )
+    .await?;
+
+    // The connection object performs the actual communication with the database,
+    // so spawn it off to run on its own.
+    tokio::spawn(async move {
+        if let Err(e) = connection.await {
+            error!("Error when connecting to TimescaleDB: {e}");
+        }
+    });
+
+    // Apply migrations
+    embedded::migrations::runner()
+        .run_async(&mut client)
+        .await?;
 
     // Load all the available checks
     let checks = load_checks(&config).await?;
@@ -40,10 +69,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!(
             "[Result] {} @ {}: {:?}: {:?}",
             result.check_name,
-            result.timestamp.unwrap_or("".to_string()),
+            result.timestamp.clone().unwrap_or("".to_string()),
             result.status,
             result.output
         );
+        result.write_to_db(&client).await?;
     }
 
     Ok(())
