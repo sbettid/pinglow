@@ -69,7 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         info!(
             "[Result] {} @ {}: {:?}: {:?}",
             result.check_name,
-            result.timestamp.clone().unwrap_or("".to_string()),
+            result.timestamp.unwrap().to_rfc3339(),
             result.status,
             result.output
         );

@@ -5,8 +5,8 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
-tokio-postgres = "0.7"
-chrono = {version = "0.4.40"}
+tokio-postgres = {version = "0.7", features = ["with-chrono-0_4"]}
+chrono = {version = "0.4", features = ["serde"]}
 log = {version = "0.4.27"}
 env_logger = "0.11" 
 kube = { version = "0.88", features = ["derive", "runtime"] }

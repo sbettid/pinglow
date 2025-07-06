@@ -78,13 +78,15 @@ pub async fn run_check(
     namespace: String,
 ) {
     // Run the check as Kubernetes job
+    // TODO: One kube job for check execution is probably overkill, are there better alternatives?
     let mut check_result = match run_check_as_kube_job(check, namespace).await {
         Ok(res) | Err(res) => res,
     };
 
     // Inject the timestamp of when we completed the check execution
-    let timestamp = Local::now().to_rfc3339();
-    check_result.set_check_result_timestamp(timestamp);
+    let timestamp = Local::now();
+    let timestamp_utc = timestamp.with_timezone(&Utc);
+    check_result.set_check_result_timestamp(timestamp_utc);
 
     // Send the check result
     if let Err(e) = result_tx.send(check_result).await {

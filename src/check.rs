@@ -1,10 +1,13 @@
-use std::{cmp::Ordering, fmt::Display};
+use std::{cmp::Ordering, fmt::Display, sync::Arc};
 
+use chrono::{DateTime, Utc};
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tokio::time::Instant;
+use tokio::{sync::RwLock, time::Instant};
 use tokio_postgres::Client;
+
+pub type SharedChecks = Arc<RwLock<Vec<RunnableCheck>>>;
 
 #[derive(Debug)]
 pub enum CheckResultStatus {
@@ -26,7 +29,7 @@ impl From<i32> for CheckResultStatus {
 }
 
 impl CheckResultStatus {
-    pub fn to_number(&self) -> i8 {
+    pub fn to_number(&self) -> i16 {
         match self {
             CheckResultStatus::Ok => 0,
             CheckResultStatus::Warning => 1,
@@ -57,11 +60,11 @@ pub struct CheckResult {
     pub check_name: String,
     pub output: String,
     pub status: CheckResultStatus,
-    pub timestamp: Option<String>,
+    pub timestamp: Option<DateTime<Utc>>,
 }
 
 impl CheckResult {
-    pub fn set_check_result_timestamp(&mut self, timestamp: String) {
+    pub fn set_check_result_timestamp(&mut self, timestamp: DateTime<Utc>) {
         self.timestamp = Some(timestamp);
     }
 
