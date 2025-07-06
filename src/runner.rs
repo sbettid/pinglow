@@ -11,7 +11,9 @@ use kube::runtime::wait::await_condition;
 use kube::{Api, Client};
 use log::debug;
 use log::error;
+use std::sync::Arc;
 use std::{collections::BinaryHeap, time::Duration};
+use tokio::sync::RwLock;
 
 use tokio::{
     sync::mpsc,
@@ -27,7 +29,7 @@ use crate::job::is_job_finished;
  * This function continuously schedule checks based on the interval
  */
 pub async fn scheduler_loop(
-    checks: Vec<RunnableCheck>,
+    shared_checks: Arc<RwLock<Vec<Arc<RunnableCheck>>>>,
     result_tx: mpsc::Sender<CheckResult>,
     namespace: String,
 ) {
@@ -36,11 +38,13 @@ pub async fn scheduler_loop(
 
     let now = Instant::now();
 
+    let checks = shared_checks.read().await;
+
     // Add all checks in the queue. The queue will be automatically ordered by next run
-    for check in checks {
+    for check in checks.iter() {
         queue.push(ScheduledCheck {
             next_run: now + Duration::from_secs(check.interval),
-            check,
+            check: check.clone(),
         });
     }
 
@@ -73,7 +77,7 @@ pub async fn scheduler_loop(
  * This function runs a check, parses the result to a check result and returns it to the main thread
  */
 pub async fn run_check(
-    check: RunnableCheck,
+    check: Arc<RunnableCheck>,
     result_tx: mpsc::Sender<CheckResult>,
     namespace: String,
 ) {
@@ -90,7 +94,7 @@ pub async fn run_check(
 
     // Send the check result
     if let Err(e) = result_tx.send(check_result).await {
-        error!("Error sending check result: {:?}", e)
+        error!("Error sending check result: {e:?}")
     }
 }
 
@@ -98,7 +102,7 @@ pub async fn run_check(
  * This function runs a check as a Kubernetes job
  */
 async fn run_check_as_kube_job(
-    check: RunnableCheck,
+    check: Arc<RunnableCheck>,
     namespace: String,
 ) -> Result<CheckResult, CheckResult> {
     let check_name = &check.check_name;
@@ -113,7 +117,7 @@ async fn run_check_as_kube_job(
     let client = Client::try_default().await.map_err(|e| {
         CheckResult::map_to_check_error(
             check_name,
-            format!("Error when creating the Kubernetes client: {:?}", e),
+            format!("Error when creating the Kubernetes client: {e:?}"),
         )
     })?;
 
@@ -122,16 +126,18 @@ async fn run_check_as_kube_job(
         check::ScriptLanguage::Python => build_python_job(
             &job_name,
             &check.script,
-            check.secrets_refs,
-            check.python_requirements,
+            &check.secrets_refs,
+            &check.python_requirements,
         ),
-        check::ScriptLanguage::Bash => build_bash_job(&job_name, &check.script, check.secrets_refs),
+        check::ScriptLanguage::Bash => {
+            build_bash_job(&job_name, &check.script, &check.secrets_refs)
+        }
     };
 
     // Get the job API
     let jobs: Api<Job> = Api::namespaced(client.clone(), &namespace);
 
-    debug!("Creating job for check {}", check_name);
+    debug!("Creating job for check {check_name}");
 
     // Create the job
     jobs.create(&PostParams::default(), &job)
@@ -139,35 +145,32 @@ async fn run_check_as_kube_job(
         .map_err(|e| {
             CheckResult::map_to_check_error(
                 check_name,
-                format!("Error when creating the Kubernetes job: {:?}", e),
+                format!("Error when creating the Kubernetes job: {e:?}"),
             )
         })?;
 
     // Wait for the job to complete
-    debug!(
-        "Waiting for job {} for check {} to complete...",
-        job_name, check_name
-    );
+    debug!("Waiting for job {job_name} for check {check_name} to complete...",);
     let _ = await_condition(jobs.clone(), &job_name, is_job_finished()).await;
 
     // Get the Pod created by the Job
     let pods: Api<Pod> = Api::namespaced(client.clone(), &namespace);
-    let lp = ListParams::default().labels(&format!("job-name={}", job_name));
+    let lp = ListParams::default().labels(&format!("job-name={job_name}"));
     let pod_list = pods.list(&lp).await.map_err(|e| {
         CheckResult::map_to_check_error(
             check_name,
-            format!("Error when retrieving the pods list: {:?}", e),
+            format!("Error when retrieving the pods list: {e:?}"),
         )
     })?;
 
     let pod = pod_list.items.into_iter().next().ok_or_else(|| {
-        CheckResult::map_to_check_error(check_name, format!("Cannot find pod for job {}", job_name))
+        CheckResult::map_to_check_error(check_name, format!("Cannot find pod for job {job_name}"))
     })?;
 
     let pod_name = pod.metadata.name.clone().ok_or_else(|| {
         CheckResult::map_to_check_error(
             check_name,
-            format!("Error getting pod name from pod {:?}", pod),
+            format!("Error getting pod name from pod {pod:?}"),
         )
     })?;
 
@@ -176,7 +179,7 @@ async fn run_check_as_kube_job(
         .logs(&pod_name, &Default::default())
         .await
         .map_err(|e| {
-            CheckResult::map_to_check_error(check_name, format!("Cannot get pod logs: {:?}", e))
+            CheckResult::map_to_check_error(check_name, format!("Cannot get pod logs: {e:?}"))
         })?;
 
     // Get the exit code of the pod
@@ -197,10 +200,7 @@ async fn run_check_as_kube_job(
         )
         .await
     {
-        error!(
-            "Error when deleting job after completion: {:?} - {:?}",
-            job_name, e
-        )
+        error!("Error when deleting job after completion: {job_name:?} - {e:?}")
     }
 
     Ok(CheckResult {

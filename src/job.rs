@@ -23,7 +23,7 @@ pub fn is_job_finished() -> impl Condition<Job> {
 pub fn build_bash_job(
     job_name: &str,
     check_script: &str,
-    secrets_refs: Option<Vec<String>>,
+    secrets_refs: &Option<Vec<String>>,
 ) -> Job {
     // Escape newlines and quotes to run inline in bash -c
     let escaped_script = check_script
@@ -33,15 +33,15 @@ pub fn build_bash_job(
         .collect::<Vec<_>>()
         .join("; ");
 
-    let escaped_script = format!("set -euo pipefail; {}", escaped_script);
+    let escaped_script = format!("set -euo pipefail; {escaped_script}");
 
     // Create the secrets object, if needed
-    let env_from: Option<Vec<EnvFromSource>> = secrets_refs.map(|secret_names| {
+    let env_from: Option<Vec<EnvFromSource>> = secrets_refs.as_ref().map(|secret_names| {
         secret_names
-            .into_iter()
+            .iter()
             .map(|secret_name| EnvFromSource {
                 secret_ref: Some(SecretEnvSource {
-                    name: Some(secret_name),
+                    name: Some(secret_name.clone()),
                     optional: Some(false),
                 }),
                 ..Default::default()
@@ -82,13 +82,13 @@ pub fn build_bash_job(
 pub fn build_python_job(
     job_name: &str,
     check_script: &str,
-    secrets_refs: Option<Vec<String>>,
-    requirements: Option<Vec<String>>,
+    secrets_refs: &Option<Vec<String>>,
+    requirements: &Option<Vec<String>>,
 ) -> Job {
     let pip_command = if let Some(requirements) = requirements {
         let reqs = requirements.join(" ");
 
-        format!("pip install {}", reqs)
+        format!("pip install {reqs}")
     } else {
         "".to_string()
     };
@@ -100,12 +100,12 @@ pub fn build_python_job(
     );
 
     // Create the secrets object, if needed
-    let env_from: Option<Vec<EnvFromSource>> = secrets_refs.map(|secret_names| {
+    let env_from: Option<Vec<EnvFromSource>> = secrets_refs.as_ref().map(|secret_names| {
         secret_names
-            .into_iter()
+            .iter()
             .map(|secret_name| EnvFromSource {
                 secret_ref: Some(SecretEnvSource {
-                    name: Some(secret_name),
+                    name: Some(secret_name.clone()),
                     optional: Some(false),
                 }),
                 ..Default::default()

@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 use tokio::{sync::RwLock, time::Instant};
 use tokio_postgres::Client;
 
-pub type SharedChecks = Arc<RwLock<Vec<RunnableCheck>>>;
+pub type SharedChecks = Arc<RwLock<Vec<Arc<RunnableCheck>>>>;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub enum CheckResultStatus {
     Ok,
     Warning,
@@ -19,6 +19,17 @@ pub enum CheckResultStatus {
 
 impl From<i32> for CheckResultStatus {
     fn from(value: i32) -> Self {
+        match value {
+            0 => CheckResultStatus::Ok,
+            1 => CheckResultStatus::Warning,
+            2 => CheckResultStatus::Critical,
+            _ => CheckResultStatus::CheckError,
+        }
+    }
+}
+
+impl From<i16> for CheckResultStatus {
+    fn from(value: i16) -> Self {
         match value {
             0 => CheckResultStatus::Ok,
             1 => CheckResultStatus::Warning,
@@ -56,6 +67,7 @@ impl Display for ScriptLanguage {
     }
 }
 
+#[derive(Serialize)]
 pub struct CheckResult {
     pub check_name: String,
     pub output: String,
@@ -77,7 +89,7 @@ impl CheckResult {
         }
     }
 
-    pub async fn write_to_db(&self, client: &Client) -> Result<u64, tokio_postgres::Error> {
+    pub async fn write_to_db(&self, client: Arc<Client>) -> Result<u64, tokio_postgres::Error> {
         if let Some(timestamp) = &self.timestamp {
             client
             .execute(
@@ -137,7 +149,7 @@ pub struct RunnableCheck {
 
 #[derive(Clone, Debug)]
 pub struct ScheduledCheck {
-    pub check: RunnableCheck,
+    pub check: Arc<RunnableCheck>,
     pub next_run: Instant,
 }
 
