@@ -208,5 +208,6 @@ async fn run_check_as_kube_job(
         output: logs,
         status: map_command_exit_code_to_check_result(*exit_code),
         timestamp: None,
+        telegram_channels: check.telegram_channels.clone().into(),
     })
 }

@@ -9,7 +9,7 @@ use tokio_postgres::Client;
 
 pub type SharedChecks = Arc<RwLock<Vec<Arc<RunnableCheck>>>>;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, PartialEq)]
 pub enum CheckResultStatus {
     Ok,
     Warning,
@@ -67,12 +67,12 @@ impl Display for ScriptLanguage {
     }
 }
 
-#[derive(Serialize)]
 pub struct CheckResult {
     pub check_name: String,
     pub output: String,
     pub status: CheckResultStatus,
     pub timestamp: Option<DateTime<Utc>>,
+    pub telegram_channels: Arc<[ConcreteTelegramChannel]>,
 }
 
 impl CheckResult {
@@ -86,6 +86,7 @@ impl CheckResult {
             output: error_message,
             status: CheckResultStatus::CheckError,
             timestamp: None,
+            telegram_channels: Arc::from(&[][..]),
         }
     }
 
@@ -116,12 +117,31 @@ pub fn map_command_exit_code_to_check_result(exit_code: Option<i32>) -> CheckRes
 }
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
+#[kube(
+    group = "myapp.io",
+    version = "v1alpha1",
+    kind = "TelegramChannel",
+    namespaced
+)]
+pub struct TelegramChannelSpec {
+    pub chat_id: String,
+    pub bot_token_ref: String, // The name of the secret
+}
+
+#[derive(Debug, Clone)]
+pub struct ConcreteTelegramChannel {
+    pub chat_id: String,
+    pub bot_token: String, // The name of the secret
+}
+
+#[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[kube(group = "pinglow.io", version = "v1alpha1", kind = "Check", namespaced)]
 #[allow(non_snake_case)]
 pub struct CheckSpec {
     pub scriptRef: String,
     pub interval: u64,
     pub secretRefs: Option<Vec<String>>,
+    pub telegram_channels: Option<Vec<TelegramChannelSpec>>,
 }
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
@@ -145,6 +165,7 @@ pub struct RunnableCheck {
     pub check_name: String,
     pub secrets_refs: Option<Vec<String>>,
     pub python_requirements: Option<Vec<String>>,
+    pub telegram_channels: Vec<ConcreteTelegramChannel>,
 }
 
 #[derive(Clone, Debug)]
