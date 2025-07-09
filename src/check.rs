@@ -118,14 +118,15 @@ pub fn map_command_exit_code_to_check_result(exit_code: Option<i32>) -> CheckRes
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[kube(
-    group = "myapp.io",
+    group = "pinglow.io",
     version = "v1alpha1",
     kind = "TelegramChannel",
     namespaced
 )]
+#[allow(non_snake_case)]
 pub struct TelegramChannelSpec {
-    pub chat_id: String,
-    pub bot_token_ref: String, // The name of the secret
+    pub chatId: String,
+    pub botTokenRef: String, // The name of the secret
 }
 
 #[derive(Debug, Clone)]
@@ -141,7 +142,7 @@ pub struct CheckSpec {
     pub scriptRef: String,
     pub interval: u64,
     pub secretRefs: Option<Vec<String>>,
-    pub telegram_channels: Option<Vec<TelegramChannelSpec>>,
+    pub telegramChannelRefs: Option<Vec<String>>,
 }
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]

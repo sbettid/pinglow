@@ -15,7 +15,7 @@ use kube::{Api, Client};
 use tokio_postgres::NoTls;
 
 use crate::api::get_check_status;
-use crate::check::{CheckResultStatus, ConcreteTelegramChannel};
+use crate::check::{CheckResultStatus, ConcreteTelegramChannel, TelegramChannel};
 use crate::{
     api::get_checks,
     check::{RunnableCheck, Script, SharedChecks},
@@ -102,25 +102,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tokio::select! {
             Some(result) = result_rx.recv() => {
                 // TODO: remove logging after finalizing implementation
-                info!(
-                    "[Result] {} @ {}: {:?}: {:?}",
-                    result.check_name,
-                    result.timestamp.unwrap().to_rfc3339(),
-                    result.status,
-                    result.output
-                );
+                // info!(
+                //     "[Result] {} @ {}: {:?}: {:?}",
+                //     result.check_name,
+                //     result.timestamp.unwrap().to_rfc3339(),
+                //     result.status,
+                //     result.output
+                // );
 
                 // Write result to DB
                 result.write_to_db(client_arc.clone()).await?;
 
                 // Send result to telegram channels
-                if result.status == CheckResultStatus::Ok && result.status != CheckResultStatus::CheckError {
+                if result.status != CheckResultStatus::Ok {
+
                     for channel in result.telegram_channels.iter() {
+
                     let url = format!("https://api.telegram.org/bot{}/sendMessage", channel.bot_token);
 
                     match  http_client.post(&url).form(&[
                         ("chat_id", channel.chat_id.clone()),
-                        ("text", format!("{0:?} - {1} is {2:?}: {3}", result.timestamp, result.check_name, result.status, result.output)),
+                        ("text", format!("{0} - {1} is {2:?}: {3}", result.timestamp.unwrap().to_rfc3339(), result.check_name, result.status, result.output)),
                     ]).send().await {
                         Ok(_) => {},
                         Err(e) => error!("Error when sending check result to Telegram channel: {e}"),
@@ -129,15 +131,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 
                 }
-
-                // http_client..post(&url)
-                //     .form(&[
-                //         ("chat_id", chat_id),
-                //         ("text", text),
-                //     ])
-                //     .send()
-                //     .await
-
 
             }
             // In case we receive a sigterm we exit to teardown our jobs in a clean way (especially rocket)
@@ -176,6 +169,9 @@ async fn load_checks(config: &PinglowConfig) -> Result<Vec<RunnableCheck>, Recon
 
     let secrets: Api<Secret> = Api::namespaced(client.clone(), &config.target_namespace);
 
+    let telegram_channels_api: Api<TelegramChannel> =
+        Api::namespaced(client.clone(), &config.target_namespace);
+
     // Create a struct where we can accumulate the actual check + script objects
     let mut runnable_checks = vec![];
 
@@ -198,18 +194,28 @@ async fn load_checks(config: &PinglowConfig) -> Result<Vec<RunnableCheck>, Recon
 
         let mut telegram_channels = vec![];
 
-        if let Some(channels) = check.spec.telegram_channels {
+        if let Some(channels) = check.spec.telegramChannelRefs {
             for channel in channels.iter() {
-                if let Ok(secret) = secrets.get(&channel.bot_token_ref).await {
-                    if let Some(bot_token) = secret.data.and_then(|d| d.get("botToken").cloned()) {
-                        telegram_channels.push(ConcreteTelegramChannel {
-                            chat_id: channel.bot_token_ref.clone(),
-                            bot_token: String::from_utf8_lossy(&bot_token.0).to_string(),
-                        });
-                    }
-                } else {
-                    error!("Failed gettting secret {0}", channel.bot_token_ref);
-                }
+                // Get concrete channel
+                let channel = telegram_channels_api
+                    .get(channel)
+                    .await
+                    .map_err(|_| ReconcileError::TelegramChannelNotFound(channel.to_string()))?;
+
+                let bot_secret = secrets.get(&channel.spec.botTokenRef).await.map_err(|_| {
+                    ReconcileError::SecretNotFound(channel.spec.botTokenRef.clone())
+                })?;
+
+                let bot_token = bot_secret
+                    .data
+                    .and_then(|d| d.get("botToken").cloned())
+                    .ok_or("Cannot find botToken")
+                    .map_err(|_| ReconcileError::SecretNotFound("botToken".to_owned()))?;
+
+                telegram_channels.push(ConcreteTelegramChannel {
+                    chat_id: channel.spec.chatId.clone(),
+                    bot_token: String::from_utf8_lossy(&bot_token.0).to_string(),
+                });
             }
         }
 
