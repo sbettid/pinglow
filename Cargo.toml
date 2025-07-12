@@ -19,6 +19,7 @@ serde_json = "1.0"
 thiserror = "1"
 refinery = {version = "0.8", features = ["tokio-postgres"]}
 rocket = { version = "0.5", features = ["json"] }
+reqwest = "0.12"
 
 [dev-dependencies]
 rustfmt = "0.10.0"
