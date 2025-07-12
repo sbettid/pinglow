@@ -1,11 +1,15 @@
-use std::{cmp::Ordering, fmt::Display};
+use std::{cmp::Ordering, fmt::Display, sync::Arc};
 
+use chrono::{DateTime, Utc};
 use kube::CustomResource;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tokio::time::Instant;
+use tokio::{sync::RwLock, time::Instant};
+use tokio_postgres::Client;
 
-#[derive(Debug)]
+pub type SharedChecks = Arc<RwLock<Vec<Arc<RunnableCheck>>>>;
+
+#[derive(Debug, Serialize)]
 pub enum CheckResultStatus {
     Ok,
     Warning,
@@ -20,6 +24,28 @@ impl From<i32> for CheckResultStatus {
             1 => CheckResultStatus::Warning,
             2 => CheckResultStatus::Critical,
             _ => CheckResultStatus::CheckError,
+        }
+    }
+}
+
+impl From<i16> for CheckResultStatus {
+    fn from(value: i16) -> Self {
+        match value {
+            0 => CheckResultStatus::Ok,
+            1 => CheckResultStatus::Warning,
+            2 => CheckResultStatus::Critical,
+            _ => CheckResultStatus::CheckError,
+        }
+    }
+}
+
+impl CheckResultStatus {
+    pub fn to_number(&self) -> i16 {
+        match self {
+            CheckResultStatus::Ok => 0,
+            CheckResultStatus::Warning => 1,
+            CheckResultStatus::Critical => 2,
+            CheckResultStatus::CheckError => 3,
         }
     }
 }
@@ -41,15 +67,16 @@ impl Display for ScriptLanguage {
     }
 }
 
+#[derive(Serialize)]
 pub struct CheckResult {
     pub check_name: String,
     pub output: String,
     pub status: CheckResultStatus,
-    pub timestamp: Option<String>,
+    pub timestamp: Option<DateTime<Utc>>,
 }
 
 impl CheckResult {
-    pub fn set_check_result_timestamp(&mut self, timestamp: String) {
+    pub fn set_check_result_timestamp(&mut self, timestamp: DateTime<Utc>) {
         self.timestamp = Some(timestamp);
     }
 
@@ -59,6 +86,24 @@ impl CheckResult {
             output: error_message,
             status: CheckResultStatus::CheckError,
             timestamp: None,
+        }
+    }
+
+    pub async fn write_to_db(&self, client: Arc<Client>) -> Result<u64, tokio_postgres::Error> {
+        if let Some(timestamp) = &self.timestamp {
+            client
+            .execute(
+                "INSERT INTO check_result (timestamp, check_name, status, output) VALUES ($1, $2, $3, $4)",
+                &[timestamp, &self.check_name, &self.status.to_number(), &self.output],
+            )
+            .await
+        } else {
+            client
+                .execute(
+                    "INSERT INTO check_result (check_name, status, output) VALUES ($1, $2, $3)",
+                    &[&self.check_name, &self.status.to_number(), &self.output],
+                )
+                .await
         }
     }
 }
@@ -104,7 +149,7 @@ pub struct RunnableCheck {
 
 #[derive(Clone, Debug)]
 pub struct ScheduledCheck {
-    pub check: RunnableCheck,
+    pub check: Arc<RunnableCheck>,
     pub next_run: Instant,
 }
 
