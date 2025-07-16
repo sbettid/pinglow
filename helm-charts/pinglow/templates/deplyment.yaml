@@ -1,20 +1,27 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: pinglow
+  name: {{ .Release.Name }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: pinglow
+      app: {{ .Release.Name }}
   template:
     metadata:
       labels:
-        app: pinglow
+        app: {{ .Release.Name }}
     spec:
-      serviceAccountName: pinglow
+      serviceAccountName: {{ .Release.Name }}
       containers:
-        - name: pinglow
-          image: ghcr.io/sbettid/pinglow:v0.1.1
+        - name: {{ .Release.Name }}
+          image: ghcr.io/sbettid/{{ .Release.Name }}:{{ .Chart.AppVersion }}
+
+          {{- if .Values.DBEnvFromSecret }}
+          envFrom:
+            - secretRef:
+                name: {{ .Values.DBEnvFromSecret }}
+          {{- end }}
+
       imagePullSecrets:
         - name: pinglow-pull

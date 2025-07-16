@@ -37,6 +37,9 @@ FROM debian:bullseye-slim
 
 COPY --from=rust-builder /app/pinglow /usr/local/bin/pinglow
 
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN addgroup --system pinglow && adduser --system --ingroup pinglow pinglow
 
 RUN chown pinglow:pinglow /usr/local/bin/pinglow && chmod 755 /usr/local/bin/pinglow
