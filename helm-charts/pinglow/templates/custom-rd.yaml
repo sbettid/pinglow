@@ -71,3 +71,37 @@ spec:
                   type: array
                   items:
                     type: string
+                telegramChannelRefs:
+                  type: array
+                  items:
+                    type: string
+                  description: Names of TelegramChannel resources to use
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: telegramchannels.{{ .Release.Name }}.io
+spec:
+  group: {{ .Release.Name }}.io
+  names:
+    plural: telegramchannels
+    singular: telegramchannel
+    kind: TelegramChannel
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              required: [chatId, botTokenRef]
+              properties:
+                chatId:
+                  type: string
+                botTokenRef:
+                  type: string
+                  description: Name of the Kubernetes Secret containing `botToken`
