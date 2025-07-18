@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1.4
+
+FROM --platform=$BUILDPLATFORM debian:bullseye-slim
+
+ARG TARGETARCH
+ARG BINARY_NAME
+
+COPY --from=bin_amd64 /${BINARY_NAME} /usr/local/bin/${BINARY_NAME}
+COPY --from=bin_arm64 /${BINARY_NAME} /usr/local/bin/${BINARY_NAME}
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN addgroup --system pinglow && adduser --system --ingroup pinglow pinglow
+
+RUN chown pinglow:pinglow /usr/local/bin/${BINARY_NAME} && chmod 755 /usr/local/bin/${BINARY_NAME}
+
+USER pinglow
+WORKDIR /home/pinglow
+
+CMD ["/usr/local/bin/pinglow"]

@@ -5,24 +5,69 @@ on:
     tags:
       - "v*" # Matches tags like v1.0.0
 
+env:
+  BINARY_NAME: pinglow
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # - name: Run tests
-      #   run: cargo test --all
+      - name: Install Rust with target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        run: cargo install cross
+
+      - name: Build with cross
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Rename binary for Docker build
+        run: |
+          mkdir -p ./bin/${{ matrix.target }}
+          cp target/${{ matrix.target }}/release/${{ env.BINARY_NAME }} ./bin/${{ matrix.target }}/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.target }}
+          path: ./bin/${{ matrix.target }}
+
+  docker:
+    name: Build and Push Multi-Arch Image
+    runs-on: ubuntu-latest
+    needs: build
+
+    permissions:
+      packages: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: ./bin
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GitHub Container Registry (GHCR)
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -33,12 +78,13 @@ jobs:
         id: extract_tag
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ghcr.io/${{ github.repository }}:${{ env.VERSION }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Build and Push Multi-Arch Image
+        run: |
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg BINARY_NAME=${{ env.BINARY_NAME }} \
+            --build-context bin_amd64=./bin/bin-x86_64-unknown-linux-musl \
+            --build-context bin_arm64=./bin/bin-aarch64-unknown-linux-musl \
+            -t ${{ env.IMAGE_NAME }}:latest \
+            --push \
+            -f ./Dockerfile.multiarch .
