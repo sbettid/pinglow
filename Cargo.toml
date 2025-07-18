@@ -22,6 +22,5 @@ rocket = { version = "0.5", features = ["json"] }
 reqwest = "0.12"
 openssl = { version = "0.10", features = ["vendored"] }
 
-
 [dev-dependencies]
 rustfmt = "0.10.0"
