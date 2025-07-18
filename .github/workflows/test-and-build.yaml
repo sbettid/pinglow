@@ -85,6 +85,6 @@ jobs:
             --build-arg BINARY_NAME=${{ env.BINARY_NAME }} \
             --build-context bin_amd64=./bin/bin-x86_64-unknown-linux-musl \
             --build-context bin_arm64=./bin/bin-aarch64-unknown-linux-musl \
-            -t ${{ env.IMAGE_NAME }}:latest \
+            -t ghcr.io/${{ github.repository }}:${{ env.VERSION }} \
             --push \
             -f ./Dockerfile.multiarch .
