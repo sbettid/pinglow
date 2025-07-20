@@ -2,6 +2,7 @@ use std::{cmp::Ordering, fmt::Display, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use kube::CustomResource;
+use log::warn;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tokio::{sync::RwLock, time::Instant};
@@ -90,22 +91,71 @@ impl CheckResult {
         }
     }
 
-    pub async fn write_to_db(&self, client: Arc<Client>) -> Result<u64, tokio_postgres::Error> {
-        if let Some(timestamp) = &self.timestamp {
-            client
+    pub fn get_output(&self) -> String {
+        let (output, _perf_data) = match self.output.split_once("|") {
+            Some((out, perf)) => (out, perf),
+            None => (self.output.as_ref(), ""),
+        };
+
+        output.to_string()
+    }
+
+    pub fn get_perf_data(&self) -> Vec<(String, f32)> {
+        let (_output, perf_data) = match self.output.split_once("|") {
+            Some((out, perf)) => (out, perf),
+            None => (self.output.as_ref(), ""),
+        };
+
+        let perf_data_list: Vec<(String, f32)> = perf_data
+            .split(",")
+            .filter_map(|pair| {
+                pair.split_once('=') // Split each entry into key=value
+                    .map(|(k, v)| {
+                        (
+                            k.trim().to_string(),
+                            v.trim().to_string().parse::<f32>().unwrap_or_else(|e| {
+                                warn!("Unable to parse performance metric as a float, setting it to 0.0 - {e}");
+                                0.0
+                            }),
+                        )
+                    })
+            })
+            .collect();
+
+        perf_data_list
+    }
+
+    pub async fn write_to_db(&self, client: Arc<Client>) -> Result<(), tokio_postgres::Error> {
+        // Parse the output to remove the performance data, if any
+        let output = self.get_output();
+
+        let perf_data_list = self.get_perf_data();
+
+        // If by chance we do not set the timestamp before, it is set to now
+        let timestamp = match self.timestamp {
+            Some(t) => t,
+            None => Utc::now(),
+        };
+
+        // Insert the main check result
+        client
             .execute(
                 "INSERT INTO check_result (timestamp, check_name, status, output) VALUES ($1, $2, $3, $4)",
-                &[timestamp, &self.check_name, &self.status.to_number(), &self.output],
+                &[&timestamp, &self.check_name, &self.status.to_number(), &output],
             )
-            .await
-        } else {
+            .await?;
+
+        // Insert performance data, if needed
+        for (perf_key, perf_value) in perf_data_list {
             client
-                .execute(
-                    "INSERT INTO check_result (check_name, status, output) VALUES ($1, $2, $3)",
-                    &[&self.check_name, &self.status.to_number(), &self.output],
-                )
-                .await
+            .execute(
+                "INSERT INTO check_result_perf_data (timestamp, check_name, perf_key, perf_value) VALUES ($1, $2, $3, $4)",
+                &[&timestamp, &self.check_name, &perf_key, &perf_value],
+            )
+            .await?;
         }
+
+        Ok(())
     }
 }
 

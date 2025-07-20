@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use check::{Check, CheckResult};
+use chrono::Local;
 use env_logger::{self, Builder};
 use k8s_openapi::api::core::v1::Secret;
 use log::{error, info};
@@ -14,7 +15,7 @@ use tokio::{
 use kube::{Api, Client};
 use tokio_postgres::NoTls;
 
-use crate::api::get_check_status;
+use crate::api::{get_check_status, get_performance_data};
 use crate::check::{CheckResultStatus, ConcreteTelegramChannel, TelegramChannel};
 use crate::{
     api::get_checks,
@@ -111,10 +112,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     for channel in result.telegram_channels.iter() {
 
                     let url = format!("https://api.telegram.org/bot{}/sendMessage", channel.bot_token);
+                    let timestamp_local = result.timestamp.unwrap().with_timezone(&Local);
+
+                    let mut output = String::new();
+
+                    output.push_str(&result.get_output());
+
+                    for (key, value) in result.get_perf_data() {
+                        output.push_str(&format!("{key} = {value}\n"));
+                    }
 
                     match  http_client.post(&url).form(&[
                         ("chat_id", channel.chat_id.clone()),
-                        ("text", format!("{0} - {1} is {2:?}: {3}", result.timestamp.unwrap().to_rfc3339(), result.check_name, result.status, result.output)),
+                        ("text", format!("{0} - {1} is {2:?}: {3}", timestamp_local.format("%Y-%m-%d %H:%M:%S %Z"), result.check_name, result.status, output)),
                     ]).send().await {
                         Ok(_) => {},
                         Err(e) => error!("Error when sending check result to Telegram channel: {e}"),
@@ -244,7 +254,10 @@ async fn start_rocket(
         .manage(pinglow_config)
         .manage(shared_checks)
         .manage(client)
-        .mount("/", routes![get_checks, get_check_status]);
+        .mount(
+            "/",
+            routes![get_checks, get_check_status, get_performance_data],
+        );
 
     let rocket = rocket.ignite().await?;
 
