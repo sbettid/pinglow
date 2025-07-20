@@ -12,8 +12,6 @@ use rocket::{
     serde::json::Json,
     Request, State,
 };
-use rocket::{get, serde::json::Json, State};
-use serde::Serialize;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_postgres::Client;

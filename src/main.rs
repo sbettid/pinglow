@@ -250,18 +250,14 @@ async fn start_rocket(
     shared_checks: SharedChecks,
     client: Arc<tokio_postgres::Client>,
 ) -> Result<(Rocket<rocket::Ignite>, Shutdown), rocket::Error> {
-<<<<<<< HEAD
-    let rocket = rocket::build().manage(shared_checks).manage(client).mount(
-        "/",
-        routes![get_checks, get_check_status, get_performance_data],
-    );
-=======
     let rocket = rocket::build()
         .manage(pinglow_config)
         .manage(shared_checks)
         .manage(client)
-        .mount("/", routes![get_checks, get_check_status]);
->>>>>>> main
+        .mount(
+            "/",
+            routes![get_checks, get_check_status, get_performance_data],
+        );
 
     let rocket = rocket.ignite().await?;
 
