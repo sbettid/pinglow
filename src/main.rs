@@ -15,7 +15,7 @@ use tokio::{
 use kube::{Api, Client};
 use tokio_postgres::NoTls;
 
-use crate::api::get_check_status;
+use crate::api::{get_check_status, get_performance_data};
 use crate::check::{CheckResultStatus, ConcreteTelegramChannel, TelegramChannel};
 use crate::{
     api::get_checks,
@@ -102,14 +102,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         tokio::select! {
             Some(result) = result_rx.recv() => {
-                // TODO: remove logging after finalizing implementation
-                // info!(
-                //     "[Result] {} @ {}: {:?}: {:?}",
-                //     result.check_name,
-                //     result.timestamp.unwrap().to_rfc3339(),
-                //     result.status,
-                //     result.output
-                // );
 
                 // Write result to DB
                 result.write_to_db(client_arc.clone()).await?;
@@ -257,10 +249,10 @@ async fn start_rocket(
     shared_checks: SharedChecks,
     client: Arc<tokio_postgres::Client>,
 ) -> Result<(Rocket<rocket::Ignite>, Shutdown), rocket::Error> {
-    let rocket = rocket::build()
-        .manage(shared_checks)
-        .manage(client)
-        .mount("/", routes![get_checks, get_check_status]);
+    let rocket = rocket::build().manage(shared_checks).manage(client).mount(
+        "/",
+        routes![get_checks, get_check_status, get_performance_data],
+    );
 
     let rocket = rocket.ignite().await?;
 

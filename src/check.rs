@@ -2,6 +2,7 @@ use std::{cmp::Ordering, fmt::Display, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use kube::CustomResource;
+use log::warn;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tokio::{sync::RwLock, time::Instant};
@@ -99,17 +100,25 @@ impl CheckResult {
         output.to_string()
     }
 
-    pub fn get_perf_data(&self) -> Vec<(String, String)> {
+    pub fn get_perf_data(&self) -> Vec<(String, f32)> {
         let (_output, perf_data) = match self.output.split_once("|") {
             Some((out, perf)) => (out, perf),
             None => (self.output.as_ref(), ""),
         };
 
-        let perf_data_list: Vec<(String, String)> = perf_data
+        let perf_data_list: Vec<(String, f32)> = perf_data
             .split(",")
             .filter_map(|pair| {
                 pair.split_once('=') // Split each entry into key=value
-                    .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+                    .map(|(k, v)| {
+                        (
+                            k.trim().to_string(),
+                            v.trim().to_string().parse::<f32>().unwrap_or_else(|e| {
+                                warn!("Unable to parse performance metric as a float, setting it to 0.0 - {e}");
+                                0.0
+                            }),
+                        )
+                    })
             })
             .collect();
 

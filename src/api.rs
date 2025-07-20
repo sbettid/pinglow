@@ -1,11 +1,19 @@
-use std::sync::Arc;
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 use chrono::{DateTime, Utc};
+use log::warn;
 use rocket::{get, serde::json::Json, State};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio_postgres::Client;
 
-use crate::check::{CheckResultStatus, RunnableCheck, ScriptLanguage, SharedChecks};
+use crate::{
+    check::{CheckResultStatus, RunnableCheck, ScriptLanguage, SharedChecks},
+    error,
+};
 
 #[derive(Serialize)]
 pub struct SimpleCheckDto {
@@ -64,4 +72,52 @@ pub async fn get_check_status(
         status: crate::check::CheckResultStatus::from(check_status),
         timestamp: last_check_result.get("timestamp"),
     }))
+}
+
+#[derive(Debug, Deserialize)]
+struct GroupedPerfData {
+    timestamp: DateTime<Utc>,
+    perf_data: HashMap<String, f32>,
+}
+
+#[get("/performance-data/<target_check>")]
+pub async fn get_performance_data(
+    checks: &State<SharedChecks>,
+    client: &State<Arc<Client>>,
+    target_check: &str,
+) -> Option<Json<BTreeMap<DateTime<Utc>, HashMap<String, f32>>>> {
+    let runnable_checks = checks.read().await;
+
+    runnable_checks
+        .iter()
+        .find(|&check| check.check_name == target_check)?;
+
+    let raw_perf_data_rows = client.query("SELECT timestamp, json_object_agg(perf_key, perf_value ORDER BY perf_key) AS perf_data FROM check_result_perf_data WHERE check_name = $1 GROUP BY timestamp ORDER BY timestamp;", &[&target_check]).await.ok()?;
+
+    let mut perf_data = Vec::new();
+
+    for raw_perf_data in raw_perf_data_rows {
+        let timestamp: chrono::DateTime<Utc> = raw_perf_data.get("timestamp");
+        let perf_data_json: Value = raw_perf_data.get("perf_data");
+
+        // Convert JSON object to HashMap<String, f32>
+        let perf_data_map: HashMap<String, f32> = serde_json::from_value(perf_data_json)
+            .map_err(|e| {
+                warn!("Failed to parse JSON perf_data: {e}");
+                error::TimescaleDBConversionError::DeserializationError(e.to_string())
+            })
+            .ok()?;
+
+        perf_data.push(GroupedPerfData {
+            timestamp,
+            perf_data: perf_data_map,
+        });
+    }
+
+    let map: BTreeMap<_, _> = perf_data
+        .into_iter()
+        .map(|entry| (entry.timestamp, entry.perf_data))
+        .collect();
+
+    Some(Json(map))
 }

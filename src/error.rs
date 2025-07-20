@@ -12,3 +12,9 @@ pub enum ReconcileError {
     #[error("Script fetch error: {0}")]
     ScriptFetchError(#[from] kube::Error),
 }
+
+#[derive(thiserror::Error, Debug)]
+pub enum TimescaleDBConversionError {
+    #[error("Cannot deserialize result: {0}")]
+    DeserializationError(String),
+}
