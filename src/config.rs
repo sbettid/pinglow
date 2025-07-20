@@ -7,6 +7,7 @@ pub struct PinglowConfig {
     pub db_host: String,
     pub db_user: String,
     pub db_user_password: String,
+    pub api_key: String,
 }
 
 /**
@@ -15,6 +16,7 @@ pub struct PinglowConfig {
 pub fn get_config_from_env() -> PinglowConfig {
     PinglowConfig {
         target_namespace: env::var("NAMESPACE").unwrap_or("pinglow".to_string()),
+        api_key: env::var("API_KEY").expect("The variable API_KEY must be set"),
         db: env::var("DB").unwrap_or("pinglow".to_string()),
         db_host: env::var("DB_HOST").unwrap_or("localhost".to_string()),
         db_user: env::var("DB_USER").expect("The variable DB_USER must be set"),

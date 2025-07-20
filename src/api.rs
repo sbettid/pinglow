@@ -1,11 +1,49 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use rocket::{get, serde::json::Json, State};
+use rocket::{
+    get,
+    http::Status,
+    request::{FromRequest, Outcome},
+    serde::json::Json,
+    Request, State,
+};
 use serde::Serialize;
 use tokio_postgres::Client;
 
-use crate::check::{CheckResultStatus, RunnableCheck, ScriptLanguage, SharedChecks};
+use crate::{
+    check::{CheckResultStatus, RunnableCheck, ScriptLanguage, SharedChecks},
+    config::PinglowConfig,
+};
+
+pub struct ApiKey;
+
+// FromRequest trait to validate the provided ApiKey
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for ApiKey {
+    type Error = ();
+
+    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        let config = request.rocket().state::<PinglowConfig>();
+        let config = match config {
+            Some(c) => c,
+            None => return Outcome::Error((Status::InternalServerError, ())),
+        };
+
+        let keys: Vec<_> = request.headers().get("x-api-key").collect();
+
+        if keys.len() != 1 {
+            return Outcome::Error((Status::Unauthorized, ()));
+        }
+
+        let client_key = keys[0];
+        if config.api_key == client_key {
+            Outcome::Success(ApiKey)
+        } else {
+            Outcome::Error((Status::Unauthorized, ()))
+        }
+    }
+}
 
 #[derive(Serialize)]
 pub struct SimpleCheckDto {
@@ -33,7 +71,7 @@ pub struct SimpleCheckResultDto {
 }
 
 #[get("/checks")]
-pub async fn get_checks(checks: &State<SharedChecks>) -> Json<Vec<SimpleCheckDto>> {
+pub async fn get_checks(_key: ApiKey, checks: &State<SharedChecks>) -> Json<Vec<SimpleCheckDto>> {
     let runnable_checks = checks.read().await;
 
     let simple_checks_to_return: Vec<SimpleCheckDto> = runnable_checks
@@ -46,6 +84,7 @@ pub async fn get_checks(checks: &State<SharedChecks>) -> Json<Vec<SimpleCheckDto
 
 #[get("/check-status/<target_check>")]
 pub async fn get_check_status(
+    _key: ApiKey,
     checks: &State<SharedChecks>,
     client: &State<Arc<Client>>,
     target_check: &str,
