@@ -1,27 +1,27 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: { { .Release.Name } }
+  name: {{ .Release.Name }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: { { .Release.Name } }
+      app: {{ .Release.Name }}
   template:
     metadata:
       labels:
-        app: { { .Release.Name } }
+        app: {{ .Release.Name }}
     spec:
-      serviceAccountName: { { .Release.Name } }
+      serviceAccountName: {{ .Release.Name }}
       containers:
-        - name: { { .Release.Name } }
-          image: ghcr.io/sbettid/{{ .Release.Name }}:{{ .Chart.AppVersion }}
+        - name: {{ .Release.Name }}
+          image: "ghcr.io/sbettid/{{ .Release.Name }}:{{ .Chart.AppVersion }}"
 
-      envFrom:
-        - secretRef:
-            name: { { .Values.ApiKeyEnvFromSecret } }
-        - secretRef:
-            name: { { .Values.DBEnvFromSecret } }
+          envFrom:
+            - secretRef:
+                name: {{ .Values.ApiKeyEnvFromSecret }}
+            - secretRef:
+                name: {{ .Values.DBEnvFromSecret }}
 
       imagePullSecrets:
         - name: pinglow-pull
