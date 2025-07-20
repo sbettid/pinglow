@@ -83,10 +83,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let scheduler_handle = tokio::spawn(scheduler_loop(
         shared_checks.clone(),
         result_tx,
-        config.target_namespace,
+        config.target_namespace.clone(),
     ));
 
-    let (rocket, rocket_shutdown) = start_rocket(shared_checks.clone(), client_arc.clone()).await?;
+    let (rocket, rocket_shutdown) =
+        start_rocket(config, shared_checks.clone(), client_arc.clone()).await?;
     let rocket_handle = tokio::spawn(async move {
         rocket.launch().await?;
         Ok::<(), rocket::Error>(())
@@ -101,15 +102,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         tokio::select! {
             Some(result) = result_rx.recv() => {
-                // TODO: remove logging after finalizing implementation
-                // info!(
-                //     "[Result] {} @ {}: {:?}: {:?}",
-                //     result.check_name,
-                //     result.timestamp.unwrap().to_rfc3339(),
-                //     result.status,
-                //     result.output
-                // );
-
                 // Write result to DB
                 result.write_to_db(client_arc.clone()).await?;
 
@@ -244,10 +236,12 @@ async fn load_checks(config: &PinglowConfig) -> Result<Vec<RunnableCheck>, Recon
 }
 
 async fn start_rocket(
+    pinglow_config: PinglowConfig,
     shared_checks: SharedChecks,
     client: Arc<tokio_postgres::Client>,
 ) -> Result<(Rocket<rocket::Ignite>, Shutdown), rocket::Error> {
     let rocket = rocket::build()
+        .manage(pinglow_config)
         .manage(shared_checks)
         .manage(client)
         .mount("/", routes![get_checks, get_check_status]);
