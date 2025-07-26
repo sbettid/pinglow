@@ -35,15 +35,6 @@ impl<'r> FromRequest<'r> for ApiKey {
             Some(c) => c,
             None => return Outcome::Error((Status::InternalServerError, ())),
         };
-        println!("Expected {:?}", config.api_key);
-        println!(
-            "{:?}",
-            request
-                .headers()
-                .iter()
-                .map(|a| a.name().to_string())
-                .collect::<Vec<String>>()
-        );
         let keys: Vec<_> = request.headers().get("x-api-key").collect();
         if keys.len() != 1 {
             return Outcome::Error((Status::Unauthorized, ()));
