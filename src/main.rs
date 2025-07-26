@@ -250,7 +250,11 @@ async fn start_rocket(
     shared_checks: SharedChecks,
     client: Arc<tokio_postgres::Client>,
 ) -> Result<(Rocket<rocket::Ignite>, Shutdown), rocket::Error> {
-    let rocket = rocket::build()
+    let figment = rocket::Config::figment()
+        .merge(("address", "0.0.0.0"))
+        .merge(("port", 8000));
+
+    let rocket = rocket::custom(figment)
         .manage(pinglow_config)
         .manage(shared_checks)
         .manage(client)
