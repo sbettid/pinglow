@@ -35,6 +35,7 @@ impl<'r> FromRequest<'r> for ApiKey {
             Some(c) => c,
             None => return Outcome::Error((Status::InternalServerError, ())),
         };
+        println!("Expected {:?}", config.api_key);
         println!(
             "{:?}",
             request
