@@ -4,7 +4,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use log::warn;
+use log::{debug, warn};
 use rocket::{
     get,
     http::Status,
@@ -35,14 +35,23 @@ impl<'r> FromRequest<'r> for ApiKey {
             Some(c) => c,
             None => return Outcome::Error((Status::InternalServerError, ())),
         };
-
+        println!(
+            "{:?}",
+            request
+                .headers()
+                .iter()
+                .map(|a| a.name().to_string())
+                .collect::<Vec<String>>()
+        );
         let keys: Vec<_> = request.headers().get("x-api-key").collect();
-
+        println!("headers: {:?}", keys);
         if keys.len() != 1 {
+            println!("no header found");
             return Outcome::Error((Status::Unauthorized, ()));
         }
 
         let client_key = keys[0];
+        println!("Client sent {}", client_key);
         if config.api_key == client_key {
             Outcome::Success(ApiKey)
         } else {
