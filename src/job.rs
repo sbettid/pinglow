@@ -41,7 +41,7 @@ pub fn build_bash_job(
             .iter()
             .map(|secret_name| EnvFromSource {
                 secret_ref: Some(SecretEnvSource {
-                    name: Some(secret_name.clone()),
+                    name: secret_name.clone(),
                     optional: Some(false),
                 }),
                 ..Default::default()
@@ -105,7 +105,7 @@ pub fn build_python_job(
             .iter()
             .map(|secret_name| EnvFromSource {
                 secret_ref: Some(SecretEnvSource {
-                    name: Some(secret_name.clone()),
+                    name: secret_name.clone(),
                     optional: Some(false),
                 }),
                 ..Default::default()
