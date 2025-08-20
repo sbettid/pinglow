@@ -11,6 +11,7 @@ use kube::runtime::wait::await_condition;
 use kube::{Api, Client};
 use log::debug;
 use log::error;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::{collections::BinaryHeap, time::Duration};
 use tokio::sync::RwLock;
@@ -20,41 +21,71 @@ use tokio::{
     time::{sleep_until, Instant},
 };
 
+use crate::check::SharedChecks;
 use crate::check::{self, RunnableCheck, ScheduledCheck};
 use crate::job::build_bash_job;
 use crate::job::build_python_job;
 use crate::job::is_job_finished;
 
+struct SchedulerState {
+    queue: BinaryHeap<ScheduledCheck>,
+    scheduled_map: HashMap<String, Arc<RunnableCheck>>, // key: check_name
+}
+
+pub enum RunnableCheckEvent {
+    AddOrUpdate(Arc<RunnableCheck>),
+    Remove(String), // check_name
+}
+
 /**
  * This function continuously schedule checks based on the interval
  */
 pub async fn scheduler_loop(
-    shared_checks: Arc<RwLock<Vec<Arc<RunnableCheck>>>>,
+    mut event_rx: mpsc::Receiver<RunnableCheckEvent>,
     result_tx: mpsc::Sender<CheckResult>,
+    shared_checks: SharedChecks,
     namespace: String,
 ) {
-    // Create the queue of checks
-    let mut queue = BinaryHeap::new();
+    let mut state = SchedulerState {
+        queue: BinaryHeap::new(),
+        scheduled_map: HashMap::new(),
+    };
 
     let now = Instant::now();
 
-    let checks = shared_checks.read().await;
-
-    // Add all checks in the queue. The queue will be automatically ordered by next run
-    for check in checks.iter() {
-        queue.push(ScheduledCheck {
-            next_run: now + Duration::from_secs(check.interval),
-            check: check.clone(),
-        });
-    }
-
     // Continuosly loop
     loop {
-        if let Some(mut scheduled) = queue.pop() {
+        // Process any pending events
+        while let Ok(event) = event_rx.try_recv() {
+            match event {
+                RunnableCheckEvent::AddOrUpdate(check) => {
+                    let check_name = check.check_name.clone();
+                    let next_run = Instant::now() + Duration::from_secs(check.interval);
+
+                    state
+                        .scheduled_map
+                        .insert(check_name.clone(), check.clone());
+                    state.queue.push(ScheduledCheck { next_run, check });
+                }
+                RunnableCheckEvent::Remove(check_name) => {
+                    state.scheduled_map.remove(&check_name);
+                }
+            }
+        }
+
+        if let Some(mut scheduled) = state.queue.pop() {
             let now = Instant::now();
             // If the next check must not yet be run just sleep
             if scheduled.next_run > now {
                 sleep_until(scheduled.next_run).await;
+            }
+
+            // Check still valid? (not removed)
+            if !state
+                .scheduled_map
+                .contains_key(&scheduled.check.check_name)
+            {
+                continue; // Skip deleted check
             }
 
             let check_interval = Duration::from_secs(scheduled.check.interval);
@@ -65,7 +96,7 @@ pub async fn scheduler_loop(
 
             // Schedule the next run
             scheduled.next_run += check_interval;
-            queue.push(scheduled);
+            state.queue.push(scheduled);
         } else {
             // If no checks are scheduled, just sleep briefly to prevent tight loop
             tokio::time::sleep(Duration::from_millis(100)).await;

@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, fmt::Display, sync::Arc};
+use std::{cmp::Ordering, collections::HashMap, fmt::Display, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use kube::CustomResource;
@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{sync::RwLock, time::Instant};
 use tokio_postgres::Client;
 
-pub type SharedChecks = Arc<RwLock<Vec<Arc<RunnableCheck>>>>;
+pub type SharedChecks = Arc<RwLock<HashMap<String, Arc<RunnableCheck>>>>;
 
 #[derive(Debug, Serialize, PartialEq)]
 pub enum CheckResultStatus {
