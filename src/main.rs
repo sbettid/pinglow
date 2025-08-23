@@ -167,13 +167,18 @@ async fn watch_checks(
 ) -> Result<(), ReconcileError> {
     let client = Client::try_default().await?;
     let checks: Api<Check> = Api::namespaced(client.clone(), &config.target_namespace);
-    let mut watcher = watcher(checks, Default::default());
+    let watcher = watcher(checks, Default::default());
+
+    // Pin the watcher stream
+    let mut watcher = Box::pin(watcher);
 
     while let Some(event) = watcher.next().await {
         match event {
-            Ok(Event::Applied(check)) => {
+            Ok(Event::Apply(check)) => {
+                info!("Check definition updated {:?}", check.metadata.name);
                 // handle added or updated Check
                 let maybe_runnable = load_single_runnable_check(&check, &client, &config).await;
+
                 if let Ok(runnable_check) = maybe_runnable {
                     event_rx
                         .send(RunnableCheckEvent::AddOrUpdate(Arc::new(runnable_check)))
@@ -181,18 +186,16 @@ async fn watch_checks(
                         .ok();
                 }
             }
-            Ok(Event::Deleted(check)) => {
+            Ok(Event::Delete(check)) => {
                 if let Some(name) = check.metadata.name {
                     event_rx.send(RunnableCheckEvent::Remove(name)).await.ok();
                 }
-            }
-            Ok(Event::Restarted(checks_list)) => {
-                // TODO: implementation needed
             }
             Err(e) => {
                 // Watch failed temporarily
                 eprintln!("watcher error: {e}");
             }
+            _ => {}
         }
     }
 
