@@ -6,9 +6,8 @@ use chrono::Local;
 use env_logger::{self, Builder};
 use futures::StreamExt;
 use k8s_openapi::api::core::v1::Secret;
-use kube::runtime::watcher::{watcher, Event};
+use kube::runtime::watcher::{watcher, Error, Event};
 use log::{error, info};
-use rocket::{routes, Rocket, Shutdown};
 use tokio::signal::unix::signal;
 use tokio::sync::mpsc::Sender;
 use tokio::{
@@ -19,11 +18,10 @@ use tokio::{
 use kube::{Api, Client};
 use tokio_postgres::NoTls;
 
-use crate::api::{get_check_status, get_performance_data};
+use crate::api::start_rocket;
 use crate::check::{CheckResultStatus, ConcreteTelegramChannel, TelegramChannel};
 use crate::runner::RunnableCheckEvent;
 use crate::{
-    api::get_checks,
     check::{RunnableCheck, Script, SharedChecks},
     config::{get_config_from_env, PinglowConfig},
     error::ReconcileError,
@@ -75,14 +73,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let client_arc = Arc::new(client);
 
+    // Hashmap that holds the checks currently loaded
     let shared_checks: SharedChecks = Arc::new(RwLock::new(HashMap::new()));
 
-    // Load all the available checks
+    // Channels to communicate checks update events and result of checks
     let (event_tx, event_rx) = mpsc::channel::<RunnableCheckEvent>(100);
     let (result_tx, mut result_rx) = mpsc::channel::<CheckResult>(100);
 
+    // Load all the available checks
     load_checks(&config, event_tx.clone()).await?;
 
+    // Thread to watch for
     tokio::spawn(watch_checks(config.clone(), event_tx.clone()));
 
     // Spawn the task which will schedule the checks in a continuous way
@@ -93,6 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.target_namespace.clone(),
     ));
 
+    // Spawn the task to host Rocket to handle API requests
     let (rocket, rocket_shutdown) =
         start_rocket(config, shared_checks.clone(), client_arc.clone()).await?;
     let rocket_handle = tokio::spawn(async move {
@@ -173,33 +175,42 @@ async fn watch_checks(
     let mut watcher = Box::pin(watcher);
 
     while let Some(event) = watcher.next().await {
-        match event {
-            Ok(Event::Apply(check)) => {
-                info!("Check definition updated {:?}", check.metadata.name);
-                // handle added or updated Check
-                let maybe_runnable = load_single_runnable_check(&check, &client, &config).await;
-
-                if let Ok(runnable_check) = maybe_runnable {
-                    event_rx
-                        .send(RunnableCheckEvent::AddOrUpdate(Arc::new(runnable_check)))
-                        .await
-                        .ok();
-                }
-            }
-            Ok(Event::Delete(check)) => {
-                if let Some(name) = check.metadata.name {
-                    event_rx.send(RunnableCheckEvent::Remove(name)).await.ok();
-                }
-            }
-            Err(e) => {
-                // Watch failed temporarily
-                eprintln!("watcher error: {e}");
-            }
-            _ => {}
-        }
+        handle_check_event(event, &event_rx, &client, &config).await;
     }
 
     Ok(())
+}
+
+async fn handle_check_event(
+    event: Result<Event<Check>, Error>,
+    event_rx: &Sender<RunnableCheckEvent>,
+    client: &Client,
+    config: &PinglowConfig,
+) {
+    match event {
+        Ok(Event::Apply(check)) => {
+            info!("Check definition updated {:?}", check.metadata.name);
+            // handle added or updated Check
+            let maybe_runnable = load_single_runnable_check(&check, client, config).await;
+
+            if let Ok(runnable_check) = maybe_runnable {
+                event_rx
+                    .send(RunnableCheckEvent::AddOrUpdate(Arc::new(runnable_check)))
+                    .await
+                    .ok();
+            }
+        }
+        Ok(Event::Delete(check)) => {
+            if let Some(name) = check.metadata.name {
+                event_rx.send(RunnableCheckEvent::Remove(name)).await.ok();
+            }
+        }
+        Err(e) => {
+            // Watch failed temporarily
+            eprintln!("watcher error: {e}");
+        }
+        _ => {}
+    }
 }
 
 async fn load_single_runnable_check(
@@ -303,31 +314,6 @@ async fn load_checks(
     info!("Loaded {:?} check(s)", check_list.items.len());
 
     Ok(())
-}
-
-async fn start_rocket(
-    pinglow_config: PinglowConfig,
-    shared_checks: SharedChecks,
-    client: Arc<tokio_postgres::Client>,
-) -> Result<(Rocket<rocket::Ignite>, Shutdown), rocket::Error> {
-    let figment = rocket::Config::figment()
-        .merge(("address", "0.0.0.0"))
-        .merge(("port", 8000));
-
-    let rocket = rocket::custom(figment)
-        .manage(pinglow_config)
-        .manage(shared_checks)
-        .manage(client)
-        .mount(
-            "/",
-            routes![get_checks, get_check_status, get_performance_data],
-        );
-
-    let rocket = rocket.ignite().await?;
-
-    let shutdown = rocket.shutdown();
-
-    Ok((rocket, shutdown))
 }
 
 #[cfg(test)]

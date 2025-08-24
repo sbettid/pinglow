@@ -9,8 +9,9 @@ use rocket::{
     get,
     http::Status,
     request::{FromRequest, Outcome},
+    routes,
     serde::json::Json,
-    Request, State,
+    Request, Rocket, Shutdown, State,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -21,6 +22,31 @@ use crate::{
     config::PinglowConfig,
     error,
 };
+
+pub async fn start_rocket(
+    pinglow_config: PinglowConfig,
+    shared_checks: SharedChecks,
+    client: Arc<tokio_postgres::Client>,
+) -> Result<(Rocket<rocket::Ignite>, Shutdown), rocket::Error> {
+    let figment = rocket::Config::figment()
+        .merge(("address", "0.0.0.0"))
+        .merge(("port", 8000));
+
+    let rocket = rocket::custom(figment)
+        .manage(pinglow_config)
+        .manage(shared_checks)
+        .manage(client)
+        .mount(
+            "/",
+            routes![get_checks, get_check_status, get_performance_data],
+        );
+
+    let rocket = rocket.ignite().await?;
+
+    let shutdown = rocket.shutdown();
+
+    Ok((rocket, shutdown))
+}
 
 pub struct ApiKey;
 
