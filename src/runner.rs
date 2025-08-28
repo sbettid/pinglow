@@ -18,7 +18,7 @@ use tokio::select;
 
 use tokio::{sync::mpsc, time::Instant};
 
-use crate::check::SharedChecks;
+use crate::check::SharedRunnableChecks;
 use crate::check::{self, RunnableCheck, ScheduledCheck};
 use crate::job::build_bash_job;
 use crate::job::build_python_job;
@@ -35,7 +35,7 @@ pub enum RunnableCheckEvent {
 async fn handle_check_event(
     event: RunnableCheckEvent,
     queue: &mut BTreeMap<String, ScheduledCheck>,
-    shared_checks: SharedChecks,
+    shared_checks: SharedRunnableChecks,
 ) {
     match event {
         RunnableCheckEvent::AddOrUpdate(check) => {
@@ -64,7 +64,7 @@ async fn handle_check_event(
 pub async fn scheduler_loop(
     mut event_rx: mpsc::Receiver<RunnableCheckEvent>,
     result_tx: mpsc::Sender<CheckResult>,
-    shared_checks: SharedChecks,
+    shared_checks: SharedRunnableChecks,
     namespace: String,
 ) {
     let mut queue: BTreeMap<String, ScheduledCheck> = BTreeMap::new();

@@ -18,14 +18,14 @@ use serde_json::Value;
 use tokio_postgres::Client;
 
 use crate::{
-    check::{CheckResultStatus, RunnableCheck, ScriptLanguage, SharedChecks},
+    check::{CheckResultStatus, RunnableCheck, ScriptLanguage, SharedRunnableChecks},
     config::PinglowConfig,
     error,
 };
 
 pub async fn start_rocket(
     pinglow_config: PinglowConfig,
-    shared_checks: SharedChecks,
+    shared_checks: SharedRunnableChecks,
     client: Arc<tokio_postgres::Client>,
 ) -> Result<(Rocket<rocket::Ignite>, Shutdown), rocket::Error> {
     let figment = rocket::Config::figment()
@@ -101,7 +101,10 @@ pub struct SimpleCheckResultDto {
 }
 
 #[get("/checks")]
-pub async fn get_checks(_key: ApiKey, checks: &State<SharedChecks>) -> Json<Vec<SimpleCheckDto>> {
+pub async fn get_checks(
+    _key: ApiKey,
+    checks: &State<SharedRunnableChecks>,
+) -> Json<Vec<SimpleCheckDto>> {
     let runnable_checks = checks.read().await;
 
     let simple_checks_to_return: Vec<SimpleCheckDto> =
@@ -113,7 +116,7 @@ pub async fn get_checks(_key: ApiKey, checks: &State<SharedChecks>) -> Json<Vec<
 #[get("/check-status/<target_check>")]
 pub async fn get_check_status(
     _key: ApiKey,
-    checks: &State<SharedChecks>,
+    checks: &State<SharedRunnableChecks>,
     client: &State<Arc<Client>>,
     target_check: &str,
 ) -> Option<Json<SimpleCheckResultDto>> {
@@ -142,7 +145,7 @@ struct GroupedPerfData {
 #[get("/performance-data/<target_check>")]
 pub async fn get_performance_data(
     _key: ApiKey,
-    checks: &State<SharedChecks>,
+    checks: &State<SharedRunnableChecks>,
     client: &State<Arc<Client>>,
     target_check: &str,
 ) -> Option<Json<BTreeMap<DateTime<Utc>, HashMap<String, f32>>>> {

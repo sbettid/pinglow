@@ -3,10 +3,9 @@ use std::sync::Arc;
 
 use check::{Check, CheckResult};
 use chrono::Local;
+use dashmap::DashMap;
 use env_logger::{self, Builder};
-use futures::StreamExt;
 use k8s_openapi::api::core::v1::Secret;
-use kube::runtime::watcher::{watcher, Error, Event};
 use log::{error, info};
 use tokio::signal::unix::signal;
 use tokio::sync::mpsc::Sender;
@@ -19,7 +18,10 @@ use kube::{Api, Client};
 use tokio_postgres::NoTls;
 
 use crate::api::start_rocket;
-use crate::check::{CheckResultStatus, ConcreteTelegramChannel, TelegramChannel};
+use crate::check::{
+    CheckResultStatus, ConcreteTelegramChannel, SharedRunnableChecks, TelegramChannel,
+};
+use crate::controller::watch_resources;
 use crate::runner::RunnableCheckEvent;
 use crate::{
     check::{RunnableCheck, Script, SharedChecks},
@@ -31,6 +33,7 @@ use crate::{
 mod api;
 mod check;
 mod config;
+mod controller;
 mod error;
 mod job;
 mod runner;
@@ -74,18 +77,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client_arc = Arc::new(client);
 
     // Hashmap that holds the checks currently loaded
-    let shared_checks: SharedChecks = Arc::new(RwLock::new(HashMap::new()));
+    let shared_checks: SharedRunnableChecks = Arc::new(RwLock::new(HashMap::new()));
+
+    let shared_original_checks: SharedChecks = Arc::new(DashMap::new());
 
     // Channels to communicate checks update events and result of checks
     let (event_tx, event_rx) = mpsc::channel::<RunnableCheckEvent>(100);
     let (result_tx, mut result_rx) = mpsc::channel::<CheckResult>(100);
 
     // Load all the available checks
-    load_checks(&config, event_tx.clone()).await?;
+    load_checks(&config, event_tx.clone(), shared_original_checks.clone()).await?;
 
     // Thread to watch for
-    tokio::spawn(watch_checks(config.clone(), event_tx.clone()));
-
+    //tokio::spawn(watch_checks(config.clone(), event_tx.clone()));
+    tokio::spawn(watch_resources(
+        config.clone(),
+        event_tx,
+        shared_original_checks,
+    ));
     // Spawn the task which will schedule the checks in a continuous way
     let scheduler_handle = tokio::spawn(scheduler_loop(
         event_rx,
@@ -163,55 +172,55 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn watch_checks(
-    config: PinglowConfig,
-    event_rx: Sender<RunnableCheckEvent>,
-) -> Result<(), ReconcileError> {
-    let client = Client::try_default().await?;
-    let checks: Api<Check> = Api::namespaced(client.clone(), &config.target_namespace);
-    let watcher = watcher(checks, Default::default());
+// async fn watch_checks(
+//     config: PinglowConfig,
+//     event_rx: Sender<RunnableCheckEvent>,
+// ) -> Result<(), ReconcileError> {
+//     let client = Client::try_default().await?;
+//     let checks: Api<Check> = Api::namespaced(client.clone(), &config.target_namespace);
+//     let watcher = watcher(checks, Default::default());
 
-    // Pin the watcher stream
-    let mut watcher = Box::pin(watcher);
+//     // Pin the watcher stream
+//     let mut watcher = Box::pin(watcher);
 
-    while let Some(event) = watcher.next().await {
-        handle_check_event(event, &event_rx, &client, &config).await;
-    }
+//     while let Some(event) = watcher.next().await {
+//         handle_check_event(event, &event_rx, &client, &config).await;
+//     }
 
-    Ok(())
-}
+//     Ok(())
+// }
 
-async fn handle_check_event(
-    event: Result<Event<Check>, Error>,
-    event_rx: &Sender<RunnableCheckEvent>,
-    client: &Client,
-    config: &PinglowConfig,
-) {
-    match event {
-        Ok(Event::Apply(check)) => {
-            info!("Check definition updated {:?}", check.metadata.name);
-            // handle added or updated Check
-            let maybe_runnable = load_single_runnable_check(&check, client, config).await;
+// async fn handle_check_event(
+//     event: Result<Event<Check>, Error>,
+//     event_rx: &Sender<RunnableCheckEvent>,
+//     client: &Client,
+//     config: &PinglowConfig,
+// ) {
+//     match event {
+//         Ok(Event::Apply(check)) => {
+//             info!("Check definition updated {:?}", check.metadata.name);
+//             // handle added or updated Check
+//             let maybe_runnable = load_single_runnable_check(&check, client, config).await;
 
-            if let Ok(runnable_check) = maybe_runnable {
-                event_rx
-                    .send(RunnableCheckEvent::AddOrUpdate(Arc::new(runnable_check)))
-                    .await
-                    .ok();
-            }
-        }
-        Ok(Event::Delete(check)) => {
-            if let Some(name) = check.metadata.name {
-                event_rx.send(RunnableCheckEvent::Remove(name)).await.ok();
-            }
-        }
-        Err(e) => {
-            // Watch failed temporarily
-            eprintln!("watcher error: {e}");
-        }
-        _ => {}
-    }
-}
+//             if let Ok(runnable_check) = maybe_runnable {
+//                 event_rx
+//                     .send(RunnableCheckEvent::AddOrUpdate(Arc::new(runnable_check)))
+//                     .await
+//                     .ok();
+//             }
+//         }
+//         Ok(Event::Delete(check)) => {
+//             if let Some(name) = check.metadata.name {
+//                 event_rx.send(RunnableCheckEvent::Remove(name)).await.ok();
+//             }
+//         }
+//         Err(e) => {
+//             // Watch failed temporarily
+//             eprintln!("watcher error: {e}");
+//         }
+//         _ => {}
+//     }
+// }
 
 async fn load_single_runnable_check(
     check: &Check,
@@ -293,6 +302,7 @@ async fn load_single_runnable_check(
 async fn load_checks(
     config: &PinglowConfig,
     event_rx: Sender<RunnableCheckEvent>,
+    shared_checks: SharedChecks,
 ) -> Result<(), ReconcileError> {
     // Create the kube client
     let client = Client::try_default().await?;
@@ -303,6 +313,18 @@ async fn load_checks(
     let check_list = checks.list(&Default::default()).await?;
 
     for check in check_list.iter() {
+        let check_name =
+            check
+                .metadata
+                .name
+                .as_ref()
+                .ok_or(ReconcileError::PropertyExtractionError(
+                    "Cannot extract check name".to_string(),
+                ))?;
+
+        // TODO: avoid cloning here
+        shared_checks.insert(check_name.to_owned(), Arc::new(check.clone()));
+
         let runnable_check = load_single_runnable_check(check, &client, config).await?;
 
         event_rx

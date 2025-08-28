@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 use tokio::{sync::RwLock, time::Instant};
 use tokio_postgres::Client;
 
-pub type SharedChecks = Arc<RwLock<HashMap<String, Arc<RunnableCheck>>>>;
+use dashmap::DashMap;
+
+pub type SharedRunnableChecks = Arc<RwLock<HashMap<String, Arc<RunnableCheck>>>>;
+pub type SharedChecks = Arc<DashMap<String, Arc<Check>>>;
 
 #[derive(Debug, Serialize, PartialEq)]
 pub enum CheckResultStatus {
