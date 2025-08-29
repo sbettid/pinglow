@@ -172,56 +172,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// async fn watch_checks(
-//     config: PinglowConfig,
-//     event_rx: Sender<RunnableCheckEvent>,
-// ) -> Result<(), ReconcileError> {
-//     let client = Client::try_default().await?;
-//     let checks: Api<Check> = Api::namespaced(client.clone(), &config.target_namespace);
-//     let watcher = watcher(checks, Default::default());
-
-//     // Pin the watcher stream
-//     let mut watcher = Box::pin(watcher);
-
-//     while let Some(event) = watcher.next().await {
-//         handle_check_event(event, &event_rx, &client, &config).await;
-//     }
-
-//     Ok(())
-// }
-
-// async fn handle_check_event(
-//     event: Result<Event<Check>, Error>,
-//     event_rx: &Sender<RunnableCheckEvent>,
-//     client: &Client,
-//     config: &PinglowConfig,
-// ) {
-//     match event {
-//         Ok(Event::Apply(check)) => {
-//             info!("Check definition updated {:?}", check.metadata.name);
-//             // handle added or updated Check
-//             let maybe_runnable = load_single_runnable_check(&check, client, config).await;
-
-//             if let Ok(runnable_check) = maybe_runnable {
-//                 event_rx
-//                     .send(RunnableCheckEvent::AddOrUpdate(Arc::new(runnable_check)))
-//                     .await
-//                     .ok();
-//             }
-//         }
-//         Ok(Event::Delete(check)) => {
-//             if let Some(name) = check.metadata.name {
-//                 event_rx.send(RunnableCheckEvent::Remove(name)).await.ok();
-//             }
-//         }
-//         Err(e) => {
-//             // Watch failed temporarily
-//             eprintln!("watcher error: {e}");
-//         }
-//         _ => {}
-//     }
-// }
-
 async fn load_single_runnable_check(
     check: &Check,
     client: &Client,
