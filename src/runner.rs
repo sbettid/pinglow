@@ -11,64 +11,105 @@ use kube::runtime::wait::await_condition;
 use kube::{Api, Client};
 use log::debug;
 use log::error;
+use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::{collections::BinaryHeap, time::Duration};
-use tokio::sync::RwLock;
+use std::time::Duration;
+use tokio::select;
 
-use tokio::{
-    sync::mpsc,
-    time::{sleep_until, Instant},
-};
+use tokio::{sync::mpsc, time::Instant};
 
+use crate::check::SharedRunnableChecks;
 use crate::check::{self, RunnableCheck, ScheduledCheck};
 use crate::job::build_bash_job;
 use crate::job::build_python_job;
 use crate::job::is_job_finished;
 
+pub enum RunnableCheckEvent {
+    AddOrUpdate(Arc<RunnableCheck>),
+    Remove(String), // check_name
+}
+
+/**
+ * This function handles the addition/update and removal of checks when an events on the Kube side occurs
+ */
+async fn handle_check_event(
+    event: RunnableCheckEvent,
+    queue: &mut BTreeMap<String, ScheduledCheck>,
+    shared_checks: SharedRunnableChecks,
+) {
+    match event {
+        RunnableCheckEvent::AddOrUpdate(check) => {
+            let check_name = check.check_name.clone();
+            let next_run = Instant::now() + Duration::from_secs(check.interval);
+
+            shared_checks
+                .write()
+                .await
+                .insert(check_name.clone(), check.clone());
+
+            // Update the scheduled check
+            queue.remove(&check.check_name);
+            queue.insert(check.check_name.clone(), ScheduledCheck { next_run, check });
+        }
+        RunnableCheckEvent::Remove(check_name) => {
+            shared_checks.write().await.remove(&check_name);
+            queue.remove(&check_name);
+        }
+    }
+}
+
 /**
  * This function continuously schedule checks based on the interval
  */
 pub async fn scheduler_loop(
-    shared_checks: Arc<RwLock<Vec<Arc<RunnableCheck>>>>,
+    mut event_rx: mpsc::Receiver<RunnableCheckEvent>,
     result_tx: mpsc::Sender<CheckResult>,
+    shared_checks: SharedRunnableChecks,
     namespace: String,
 ) {
-    // Create the queue of checks
-    let mut queue = BinaryHeap::new();
-
-    let now = Instant::now();
-
-    let checks = shared_checks.read().await;
-
-    // Add all checks in the queue. The queue will be automatically ordered by next run
-    for check in checks.iter() {
-        queue.push(ScheduledCheck {
-            next_run: now + Duration::from_secs(check.interval),
-            check: check.clone(),
-        });
-    }
+    let mut queue: BTreeMap<String, ScheduledCheck> = BTreeMap::new();
 
     // Continuosly loop
     loop {
-        if let Some(mut scheduled) = queue.pop() {
+        // Check if there's a scheduled task
+        if let Some((_check_name, mut scheduled_check)) =
+            queue.iter().next().map(|(k, v)| (k.clone(), v.clone()))
+        {
             let now = Instant::now();
-            // If the next check must not yet be run just sleep
-            if scheduled.next_run > now {
-                sleep_until(scheduled.next_run).await;
+            let delay = scheduled_check.next_run.saturating_duration_since(now);
+
+            select! {
+                maybe_event = event_rx.recv() => {
+                    if let Some(event) = maybe_event {
+                        handle_check_event(event, &mut queue, shared_checks.clone()).await
+                    }
+                }
+                _ = tokio::time::sleep(delay) => {
+                    // Check still valid? (not removed)
+                    if !shared_checks
+                        .read()
+                        .await
+                        .contains_key(&scheduled_check.check.check_name)
+                    {
+                        continue; // Skip deleted check
+                    }
+
+                    let check_interval = Duration::from_secs(scheduled_check.check.interval);
+
+                    // Run the check asynchronously
+                    let tx = result_tx.clone();
+                    tokio::spawn(run_check(scheduled_check.check.clone(), tx, namespace.clone()));
+
+                    // Schedule the next run
+                    scheduled_check.next_run += check_interval;
+                    queue.insert(scheduled_check.check.check_name.clone(), scheduled_check);
+                }
             }
-
-            let check_interval = Duration::from_secs(scheduled.check.interval);
-
-            // Run the check asynchronously
-            let tx = result_tx.clone();
-            tokio::spawn(run_check(scheduled.check.clone(), tx, namespace.clone()));
-
-            // Schedule the next run
-            scheduled.next_run += check_interval;
-            queue.push(scheduled);
         } else {
-            // If no checks are scheduled, just sleep briefly to prevent tight loop
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            // No scheduled checks, wait for events
+            if let Some(event) = event_rx.recv().await {
+                handle_check_event(event, &mut queue, shared_checks.clone()).await
+            }
         }
     }
 }

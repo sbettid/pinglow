@@ -9,18 +9,44 @@ use rocket::{
     get,
     http::Status,
     request::{FromRequest, Outcome},
+    routes,
     serde::json::Json,
-    Request, State,
+    Request, Rocket, Shutdown, State,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_postgres::Client;
 
 use crate::{
-    check::{CheckResultStatus, RunnableCheck, ScriptLanguage, SharedChecks},
+    check::{CheckResultStatus, RunnableCheck, ScriptLanguage, SharedRunnableChecks},
     config::PinglowConfig,
     error,
 };
+
+pub async fn start_rocket(
+    pinglow_config: PinglowConfig,
+    shared_checks: SharedRunnableChecks,
+    client: Arc<tokio_postgres::Client>,
+) -> Result<(Rocket<rocket::Ignite>, Shutdown), rocket::Error> {
+    let figment = rocket::Config::figment()
+        .merge(("address", "0.0.0.0"))
+        .merge(("port", 8000));
+
+    let rocket = rocket::custom(figment)
+        .manage(pinglow_config)
+        .manage(shared_checks)
+        .manage(client)
+        .mount(
+            "/",
+            routes![get_checks, get_check_status, get_performance_data],
+        );
+
+    let rocket = rocket.ignite().await?;
+
+    let shutdown = rocket.shutdown();
+
+    Ok((rocket, shutdown))
+}
 
 pub struct ApiKey;
 
@@ -56,8 +82,8 @@ pub struct SimpleCheckDto {
     pub language: ScriptLanguage,
 }
 
-impl From<&RunnableCheck> for SimpleCheckDto {
-    fn from(value: &RunnableCheck) -> Self {
+impl From<&Arc<RunnableCheck>> for SimpleCheckDto {
+    fn from(value: &Arc<RunnableCheck>) -> Self {
         Self {
             check_name: value.check_name.clone(),
             interval: value.interval,
@@ -75,13 +101,14 @@ pub struct SimpleCheckResultDto {
 }
 
 #[get("/checks")]
-pub async fn get_checks(_key: ApiKey, checks: &State<SharedChecks>) -> Json<Vec<SimpleCheckDto>> {
+pub async fn get_checks(
+    _key: ApiKey,
+    checks: &State<SharedRunnableChecks>,
+) -> Json<Vec<SimpleCheckDto>> {
     let runnable_checks = checks.read().await;
 
-    let simple_checks_to_return: Vec<SimpleCheckDto> = runnable_checks
-        .iter()
-        .map(|check| check.as_ref().into())
-        .collect();
+    let simple_checks_to_return: Vec<SimpleCheckDto> =
+        runnable_checks.iter().map(|check| check.1.into()).collect();
 
     Json(simple_checks_to_return)
 }
@@ -89,7 +116,7 @@ pub async fn get_checks(_key: ApiKey, checks: &State<SharedChecks>) -> Json<Vec<
 #[get("/check-status/<target_check>")]
 pub async fn get_check_status(
     _key: ApiKey,
-    checks: &State<SharedChecks>,
+    checks: &State<SharedRunnableChecks>,
     client: &State<Arc<Client>>,
     target_check: &str,
 ) -> Option<Json<SimpleCheckResultDto>> {
@@ -97,7 +124,7 @@ pub async fn get_check_status(
 
     runnable_checks
         .iter()
-        .find(|&check| check.check_name == target_check)?;
+        .find(|&check| check.0 == target_check)?;
 
     let last_check_result = client.query_one("SELECT timestamp,status,output from check_result where check_name = $1 order by timestamp desc limit 1", &[&target_check]).await.ok()?;
     let check_status: i16 = last_check_result.get("status");
@@ -118,7 +145,7 @@ struct GroupedPerfData {
 #[get("/performance-data/<target_check>")]
 pub async fn get_performance_data(
     _key: ApiKey,
-    checks: &State<SharedChecks>,
+    checks: &State<SharedRunnableChecks>,
     client: &State<Arc<Client>>,
     target_check: &str,
 ) -> Option<Json<BTreeMap<DateTime<Utc>, HashMap<String, f32>>>> {
@@ -126,7 +153,7 @@ pub async fn get_performance_data(
 
     runnable_checks
         .iter()
-        .find(|&check| check.check_name == target_check)?;
+        .find(|&check| check.0 == target_check)?;
 
     let raw_perf_data_rows = client.query("SELECT timestamp, json_object_agg(perf_key, perf_value ORDER BY perf_key) AS perf_data FROM check_result_perf_data WHERE check_name = $1 GROUP BY timestamp ORDER BY timestamp;", &[&target_check]).await.ok()?;
 

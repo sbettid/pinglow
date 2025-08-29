@@ -1,12 +1,14 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use check::{Check, CheckResult};
 use chrono::Local;
+use dashmap::DashMap;
 use env_logger::{self, Builder};
 use k8s_openapi::api::core::v1::Secret;
 use log::{error, info};
-use rocket::{routes, Rocket, Shutdown};
 use tokio::signal::unix::signal;
+use tokio::sync::mpsc::Sender;
 use tokio::{
     signal::unix::SignalKind,
     sync::{mpsc, RwLock},
@@ -15,10 +17,13 @@ use tokio::{
 use kube::{Api, Client};
 use tokio_postgres::NoTls;
 
-use crate::api::{get_check_status, get_performance_data};
-use crate::check::{CheckResultStatus, ConcreteTelegramChannel, TelegramChannel};
+use crate::api::start_rocket;
+use crate::check::{
+    CheckResultStatus, ConcreteTelegramChannel, SharedRunnableChecks, TelegramChannel,
+};
+use crate::controller::watch_resources;
+use crate::runner::RunnableCheckEvent;
 use crate::{
-    api::get_checks,
     check::{RunnableCheck, Script, SharedChecks},
     config::{get_config_from_env, PinglowConfig},
     error::ReconcileError,
@@ -28,6 +33,7 @@ use crate::{
 mod api;
 mod check;
 mod config;
+mod controller;
 mod error;
 mod job;
 mod runner;
@@ -70,23 +76,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let client_arc = Arc::new(client);
 
-    // Load all the available checks
-    let checks = load_checks(&config).await?;
+    // Hashmap that holds the checks currently loaded
+    let shared_checks: SharedRunnableChecks = Arc::new(RwLock::new(HashMap::new()));
 
-    let checks: Vec<Arc<RunnableCheck>> = checks.into_iter().map(Arc::new).collect();
+    let shared_original_checks: SharedChecks = Arc::new(DashMap::new());
 
-    let shared_checks = Arc::new(RwLock::new(checks));
-
-    // Prepare the channel to send back the results
+    // Channels to communicate checks update events and result of checks
+    let (event_tx, event_rx) = mpsc::channel::<RunnableCheckEvent>(100);
     let (result_tx, mut result_rx) = mpsc::channel::<CheckResult>(100);
 
+    // Load all the available checks
+    load_checks(&config, event_tx.clone(), shared_original_checks.clone()).await?;
+
+    // Thread to watch for
+    //tokio::spawn(watch_checks(config.clone(), event_tx.clone()));
+    tokio::spawn(watch_resources(
+        config.clone(),
+        event_tx,
+        shared_original_checks,
+    ));
     // Spawn the task which will schedule the checks in a continuous way
     let scheduler_handle = tokio::spawn(scheduler_loop(
-        shared_checks.clone(),
+        event_rx,
         result_tx,
+        shared_checks.clone(),
         config.target_namespace.clone(),
     ));
 
+    // Spawn the task to host Rocket to handle API requests
     let (rocket, rocket_shutdown) =
         start_rocket(config, shared_checks.clone(), client_arc.clone()).await?;
     let rocket_handle = tokio::spawn(async move {
@@ -155,10 +172,88 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+async fn load_single_runnable_check(
+    check: &Check,
+    client: &Client,
+    config: &PinglowConfig,
+) -> Result<RunnableCheck, ReconcileError> {
+    let scripts: Api<Script> = Api::namespaced(client.clone(), &config.target_namespace);
+
+    let secrets: Api<Secret> = Api::namespaced(client.clone(), &config.target_namespace);
+
+    let telegram_channels_api: Api<TelegramChannel> =
+        Api::namespaced(client.clone(), &config.target_namespace);
+
+    // Get the script name from the check specification
+    let script_name = &check.spec.scriptRef;
+
+    // Retrieve the check name and use a default one if not found (unlikely)
+    let check_name = check
+        .metadata
+        .name
+        .clone()
+        .unwrap_or("Unnamed check".to_string());
+
+    // Retrieve the corresponding script
+    let script = scripts
+        .get(script_name)
+        .await
+        .map_err(|_| ReconcileError::ScriptNotFound(script_name.clone()))?;
+
+    let mut telegram_channels = vec![];
+
+    if let Some(channels) = &check.spec.telegramChannelRefs {
+        for channel in channels.iter() {
+            // Get concrete channel
+            let channel = telegram_channels_api
+                .get(channel)
+                .await
+                .map_err(|_| ReconcileError::TelegramChannelNotFound(channel.to_string()))?;
+
+            let bot_secret = secrets
+                .get(&channel.spec.botTokenRef)
+                .await
+                .map_err(|_| ReconcileError::SecretNotFound(channel.spec.botTokenRef.clone()))?;
+
+            let bot_token = bot_secret
+                .data
+                .and_then(|d| d.get("botToken").cloned())
+                .ok_or("Cannot find botToken")
+                .map_err(|_| ReconcileError::SecretNotFound("botToken".to_owned()))?;
+
+            telegram_channels.push(ConcreteTelegramChannel {
+                chat_id: channel.spec.chatId.clone(),
+                bot_token: String::from_utf8_lossy(&bot_token.0).to_string(),
+            });
+        }
+    }
+
+    let secrets_refs = &check.spec.secretRefs;
+
+    let python_requirements = &script.spec.python_requirements;
+
+    // Build the runnable check object
+    let runnable_check = RunnableCheck {
+        script: script.spec.content,
+        interval: check.spec.interval,
+        language: script.spec.language,
+        check_name,
+        secrets_refs: secrets_refs.clone(),
+        python_requirements: python_requirements.clone(),
+        telegram_channels,
+    };
+
+    Ok(runnable_check)
+}
+
 /**
  * This function is used to load all the checks from the CR of the pinglow namespace
  */
-async fn load_checks(config: &PinglowConfig) -> Result<Vec<RunnableCheck>, ReconcileError> {
+async fn load_checks(
+    config: &PinglowConfig,
+    event_rx: Sender<RunnableCheckEvent>,
+    shared_checks: SharedChecks,
+) -> Result<(), ReconcileError> {
     // Create the kube client
     let client = Client::try_default().await?;
 
@@ -167,107 +262,30 @@ async fn load_checks(config: &PinglowConfig) -> Result<Vec<RunnableCheck>, Recon
 
     let check_list = checks.list(&Default::default()).await?;
 
-    let scripts: Api<Script> = Api::namespaced(client.clone(), &config.target_namespace);
+    for check in check_list.iter() {
+        let check_name =
+            check
+                .metadata
+                .name
+                .as_ref()
+                .ok_or(ReconcileError::PropertyExtractionError(
+                    "Cannot extract check name".to_string(),
+                ))?;
 
-    let secrets: Api<Secret> = Api::namespaced(client.clone(), &config.target_namespace);
+        // TODO: avoid cloning here
+        shared_checks.insert(check_name.to_owned(), Arc::new(check.clone()));
 
-    let telegram_channels_api: Api<TelegramChannel> =
-        Api::namespaced(client.clone(), &config.target_namespace);
+        let runnable_check = load_single_runnable_check(check, &client, config).await?;
 
-    // Create a struct where we can accumulate the actual check + script objects
-    let mut runnable_checks = vec![];
-
-    for check in check_list {
-        // Get the script name from the check specification
-        let script_name = &check.spec.scriptRef;
-
-        // Retrieve the check name and use a default one if not found (unlikely)
-        let check_name = check
-            .metadata
-            .name
-            .clone()
-            .unwrap_or("Unnamed check".to_string());
-
-        // Retrieve the corresponding script
-        let script = scripts
-            .get(script_name)
+        event_rx
+            .send(RunnableCheckEvent::AddOrUpdate(Arc::new(runnable_check)))
             .await
-            .map_err(|_| ReconcileError::ScriptNotFound(script_name.clone()))?;
-
-        let mut telegram_channels = vec![];
-
-        if let Some(channels) = check.spec.telegramChannelRefs {
-            for channel in channels.iter() {
-                // Get concrete channel
-                let channel = telegram_channels_api
-                    .get(channel)
-                    .await
-                    .map_err(|_| ReconcileError::TelegramChannelNotFound(channel.to_string()))?;
-
-                let bot_secret = secrets.get(&channel.spec.botTokenRef).await.map_err(|_| {
-                    ReconcileError::SecretNotFound(channel.spec.botTokenRef.clone())
-                })?;
-
-                let bot_token = bot_secret
-                    .data
-                    .and_then(|d| d.get("botToken").cloned())
-                    .ok_or("Cannot find botToken")
-                    .map_err(|_| ReconcileError::SecretNotFound("botToken".to_owned()))?;
-
-                telegram_channels.push(ConcreteTelegramChannel {
-                    chat_id: channel.spec.chatId.clone(),
-                    bot_token: String::from_utf8_lossy(&bot_token.0).to_string(),
-                });
-            }
-        }
-
-        let secrets_refs = &check.spec.secretRefs;
-
-        let python_requirements = &script.spec.python_requirements;
-
-        // Build the runnable check object
-        let runnable_check = RunnableCheck {
-            script: script.spec.content,
-            interval: check.spec.interval,
-            language: script.spec.language,
-            check_name,
-            secrets_refs: secrets_refs.clone(),
-            python_requirements: python_requirements.clone(),
-            telegram_channels,
-        };
-
-        // Add it to our queue of checks
-        runnable_checks.push(runnable_check);
+            .ok();
     }
 
-    info!("Loaded {:?} check(s)", runnable_checks.len());
+    info!("Loaded {:?} check(s)", check_list.items.len());
 
-    Ok(runnable_checks)
-}
-
-async fn start_rocket(
-    pinglow_config: PinglowConfig,
-    shared_checks: SharedChecks,
-    client: Arc<tokio_postgres::Client>,
-) -> Result<(Rocket<rocket::Ignite>, Shutdown), rocket::Error> {
-    let figment = rocket::Config::figment()
-        .merge(("address", "0.0.0.0"))
-        .merge(("port", 8000));
-
-    let rocket = rocket::custom(figment)
-        .manage(pinglow_config)
-        .manage(shared_checks)
-        .manage(client)
-        .mount(
-            "/",
-            routes![get_checks, get_check_status, get_performance_data],
-        );
-
-    let rocket = rocket.ignite().await?;
-
-    let shutdown = rocket.shutdown();
-
-    Ok((rocket, shutdown))
+    Ok(())
 }
 
 #[cfg(test)]
