@@ -14,7 +14,7 @@ use kube::{
     runtime::{watcher, Controller},
     Api, Client,
 };
-use log::{error, info};
+use log::{debug, error};
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
 
@@ -66,7 +66,7 @@ pub async fn watch_resources(
         .run(reconcile, error_policy, context)
         .for_each(|res| async move {
             match res {
-                Ok((o, _)) => info!("Check update send {o:?}"),
+                Ok((o, _)) => debug!("Check update send {o:?}"),
                 Err(e) => error!("Reconcile loop error: {e}"),
             }
         })
@@ -77,8 +77,6 @@ pub async fn watch_resources(
 
 /// The reconciler that will be called when either object change
 async fn reconcile(check: Arc<Check>, ctx: Arc<ContextData>) -> Result<Action, ReconcileError> {
-    info!("From reconcile loading {:?}", check.metadata.name);
-
     let check_name =
         check
             .metadata

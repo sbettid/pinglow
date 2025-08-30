@@ -34,7 +34,7 @@ pub enum RunnableCheckEvent {
  */
 async fn handle_check_event(
     event: RunnableCheckEvent,
-    queue: &mut BTreeMap<String, ScheduledCheck>,
+    queue: &mut BTreeMap<Instant, ScheduledCheck>,
     shared_checks: SharedRunnableChecks,
 ) {
     match event {
@@ -48,12 +48,12 @@ async fn handle_check_event(
                 .insert(check_name.clone(), check.clone());
 
             // Update the scheduled check
-            queue.remove(&check.check_name);
-            queue.insert(check.check_name.clone(), ScheduledCheck { next_run, check });
+            queue.retain(|_i, scheduled_check| scheduled_check.check.check_name != check_name);
+            queue.insert(next_run, ScheduledCheck { next_run, check });
         }
         RunnableCheckEvent::Remove(check_name) => {
             shared_checks.write().await.remove(&check_name);
-            queue.remove(&check_name);
+            queue.retain(|_i, scheduled_check| scheduled_check.check.check_name != check_name);
         }
     }
 }
@@ -67,14 +67,16 @@ pub async fn scheduler_loop(
     shared_checks: SharedRunnableChecks,
     namespace: String,
 ) {
-    let mut queue: BTreeMap<String, ScheduledCheck> = BTreeMap::new();
+    let mut queue: BTreeMap<Instant, ScheduledCheck> = BTreeMap::new();
 
     // Continuosly loop
     loop {
         // Check if there's a scheduled task
-        if let Some((_check_name, mut scheduled_check)) =
-            queue.iter().next().map(|(k, v)| (k.clone(), v.clone()))
+        if let Some((_check_instant, mut scheduled_check)) =
+            queue.iter().next().map(|(k, v)| (*k, v.clone()))
         {
+            debug!("Next check is {scheduled_check:?}");
+
             let now = Instant::now();
             let delay = scheduled_check.next_run.saturating_duration_since(now);
 
@@ -96,13 +98,16 @@ pub async fn scheduler_loop(
 
                     let check_interval = Duration::from_secs(scheduled_check.check.interval);
 
+                    // Remove the check since it is being executed
+                    queue.retain(|_i, check_in_queue| check_in_queue.check.check_name != scheduled_check.check.check_name);
+
                     // Run the check asynchronously
                     let tx = result_tx.clone();
                     tokio::spawn(run_check(scheduled_check.check.clone(), tx, namespace.clone()));
 
                     // Schedule the next run
                     scheduled_check.next_run += check_interval;
-                    queue.insert(scheduled_check.check.check_name.clone(), scheduled_check);
+                    queue.insert(scheduled_check.next_run, scheduled_check);
                 }
             }
         } else {
