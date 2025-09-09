@@ -131,17 +131,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let url = format!("https://api.telegram.org/bot{}/sendMessage", channel.bot_token);
                     let timestamp_local = result.timestamp.unwrap().with_timezone(&Local);
 
-                    let mut output = String::new();
-
-                    output.push_str(&result.get_output());
-
-                    for (key, value) in result.get_perf_data() {
-                        output.push_str(&format!("{key} = {value}\n"));
-                    }
-
                     match  http_client.post(&url).form(&[
                         ("chat_id", channel.chat_id.clone()),
-                        ("text", format!("{0} - {1} is {2:?}: {3}", timestamp_local.format("%Y-%m-%d %H:%M:%S %Z"), result.check_name, result.status, output)),
+                        ("text", format!("<b>Date</b>: {0}<br><b>Check name</b>: {1} <br><b>Status</b>: {2:?}<br><b>Output<b><br>{3}", timestamp_local.format("%Y-%m-%d %H:%M:%S %Z"), result.check_name, result.status, result.get_output())),
+                        ("parse_mode", "HTML".to_string()),
                     ]).send().await {
                         Ok(_) => {},
                         Err(e) => error!("Error when sending check result to Telegram channel: {e}"),
