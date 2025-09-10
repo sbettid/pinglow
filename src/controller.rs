@@ -126,7 +126,7 @@ fn map_script_to_checks(
     let matching_checks: Vec<_> = shared_original_checks
         .iter()
         .filter_map(|entry| {
-            if *entry.key() == script_name {
+            if *entry.spec.scriptRef == script_name {
                 Some(entry.value().clone())
             } else {
                 None
