@@ -1,0 +1,42 @@
+/**
+ * CSS files with the .module.css suffix will be treated as CSS modules
+ * and scoped locally.
+ */
+
+
+
+.hero {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 70vh;
+  background: #0c131d;
+  color: white;
+  text-align: center;
+  padding: 2rem;
+}
+
+.readTheDocsLink {
+  background: #31c0df;
+  margin-top: 2rem;
+  color: black;
+}
+
+.container {
+  max-width: 600px;
+}
+
+.title {
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.subtitle {
+  font-size: 1.2rem;
+  margin-bottom: 2rem;
+  margin-top: 4rem;
+}
+
+.pinglowLogo {
+  max-width: 50% !important;
+}

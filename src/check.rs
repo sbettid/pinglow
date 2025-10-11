@@ -9,11 +9,12 @@ use tokio::{sync::RwLock, time::Instant};
 use tokio_postgres::Client;
 
 use dashmap::DashMap;
+use utoipa::ToSchema;
 
 pub type SharedRunnableChecks = Arc<RwLock<HashMap<String, Arc<RunnableCheck>>>>;
 pub type SharedChecks = Arc<DashMap<String, Arc<Check>>>;
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Serialize, PartialEq, ToSchema)]
 pub enum CheckResultStatus {
     Ok,
     Warning,
@@ -54,7 +55,7 @@ impl CheckResultStatus {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, ToSchema)]
 pub enum ScriptLanguage {
     #[serde(rename = "Python")]
     Python,
