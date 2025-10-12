@@ -22,7 +22,7 @@ const config: Config = {
 
   organizationName: 'sbettid',
   projectName: 'pinglow',
-  deploymentBranch: 'gh-pages',
+  deploymentBranch: 'main',
 
   onBrokenLinks: 'warn',
 
