@@ -95,6 +95,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
       - name: Generate openapi specification
         run: cargo run --bin generate-openapi
 
@@ -104,7 +109,7 @@ jobs:
 
       - name: Generate dyanmic openapi menu
         working-directory: docs
-        run: npm run generate-sidebars
+        run: python src/scripts/generateOpenapiMenu.py
 
       - name: Build the doc
         working-directory: docs

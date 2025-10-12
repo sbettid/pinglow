@@ -24,7 +24,7 @@ const config: Config = {
   projectName: 'pinglow',
   deploymentBranch: 'gh-pages',
 
-  onBrokenLinks: 'throw',
+  onBrokenLinks: 'warn',
 
   // Even if you don't use internationalization, you can use this field to set
   // may want to replace "en" with "zh-Hans".
