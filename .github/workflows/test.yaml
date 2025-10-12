@@ -16,3 +16,26 @@ jobs:
 
       - name: Run tests
         run: cargo test --all
+
+  doc-ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Generate openapi specification
+        run: cargo run --bin generate-openapi
+
+      - name: Install dependencies
+        working-directory: docs
+        run: npm ci
+
+      - name: Generate dyanmic openapi menu
+        working-directory: docs
+        run: npm run generate-sidebars
+
+      - name: Build the doc
+        working-directory: docs
+        run: npm run build
+
