@@ -23,7 +23,7 @@ rocket = { version = "0.5", features = ["json"] }
 reqwest = "0.12"
 openssl = { version = "0.10", features = ["vendored"] }
 dashmap = "6.1.0"
-utoipa = {version = "4", features = ["chrono"]}
+utoipa = {version = "5", features = ["chrono"]}
 
 [dev-dependencies]
 rustfmt = "0.10.0"
