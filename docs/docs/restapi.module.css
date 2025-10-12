@@ -1,0 +1,19 @@
+.fullWidthRedoc {
+    width: 80vw !important;
+    margin-left: -10%;
+    padding: 0;
+}
+
+/* Make it 100vw on smaller screens */
+@media (max-width: 996px) {
+    .fullWidthRedoc {
+        width: 100vw !important;
+        margin-left: 0;
+        margin-right: 0;
+    }
+}
+
+.fullWidthRedoc>div {
+    max-width: 100% !important;
+    padding: 0 !important;
+}

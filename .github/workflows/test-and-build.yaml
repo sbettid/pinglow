@@ -88,3 +88,36 @@ jobs:
             -t ghcr.io/${{ github.repository }}:${{ env.VERSION }} \
             --push \
             -f ./Dockerfile.multiarch .
+  doc-ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Generate openapi specification
+        run: cargo run --bin generate-openapi
+
+      - name: Install dependencies
+        working-directory: docs
+        run: npm ci
+
+      - name: Generate dyanmic openapi menu
+        working-directory: docs
+        run: python src/scripts/generateOpenapiMenu.py
+
+      - name: Build the doc
+        working-directory: docs
+        run: npm run build
+
+      - name: Deploy to GitHub Pages
+        env:
+          GIT_USER: github-actions
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        working-directory: docs
+        run: npx docusaurus deploy

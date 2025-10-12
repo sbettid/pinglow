@@ -16,6 +16,7 @@ use rocket::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_postgres::Client;
+use utoipa::{OpenApi, ToSchema};
 
 use crate::{
     check::{CheckResultStatus, RunnableCheck, ScriptLanguage, SharedRunnableChecks},
@@ -75,7 +76,7 @@ impl<'r> FromRequest<'r> for ApiKey {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct SimpleCheckDto {
     pub check_name: String,
     pub interval: u64,
@@ -92,7 +93,7 @@ impl From<&Arc<RunnableCheck>> for SimpleCheckDto {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct SimpleCheckResultDto {
     pub check_name: String,
     pub output: String,
@@ -100,6 +101,13 @@ pub struct SimpleCheckResultDto {
     pub timestamp: Option<DateTime<Utc>>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/checks",
+    responses(
+        (status = 200, description = "List of checks", body = [SimpleCheckDto])
+    )
+)]
 #[get("/checks")]
 pub async fn get_checks(
     _key: ApiKey,
@@ -113,6 +121,16 @@ pub async fn get_checks(
     Json(simple_checks_to_return)
 }
 
+#[utoipa::path(
+    get,
+    path = "/check-status/{target_check}",
+     params(
+        ("target_check" = String, Path, description = "The check for which we would like to know the status")
+    ),
+    responses(
+        (status = 200, description = "The last status of the check", body = [SimpleCheckResultDto])
+    )
+)]
 #[get("/check-status/<target_check>")]
 pub async fn get_check_status(
     _key: ApiKey,
@@ -142,6 +160,16 @@ struct GroupedPerfData {
     perf_data: HashMap<String, f32>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/performance-data/{target_check}",
+     params(
+        ("target_check" = String, Path, description = "The check for which we would like to get the performance data")
+    ),
+    responses(
+        (status = 200, description = "The performance data of the check", body = [BTreeMap<DateTime<Utc>, HashMap<String, f32>>])
+    )
+)]
 #[get("/performance-data/<target_check>")]
 pub async fn get_performance_data(
     _key: ApiKey,
@@ -184,3 +212,21 @@ pub async fn get_performance_data(
 
     Some(Json(map))
 }
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(get_checks, get_check_status, get_performance_data),
+    components(schemas(
+        SimpleCheckDto,
+        SimpleCheckResultDto,
+        CheckResultStatus,
+        ScriptLanguage
+    )),
+    info(
+        title = "Pinglow RestAPI",
+        version = "1.0.0",
+        license(name = "MIT", url = "https://opensource.org/licenses/MIT"),
+        description = "The RestAPI to interact with Pinglow"
+    )
+)]
+pub struct ApiDoc;

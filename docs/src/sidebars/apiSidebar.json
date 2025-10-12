@@ -1,0 +1,26 @@
+{
+  "apiSidebar": [
+    {
+      "type": "category",
+      "label": "RestAPI",
+      "items": [
+        "restapi",
+        {
+          "type": "link",
+          "label": "GET /check-status/{target_check}",
+          "href": "/docs/restapi#tag/crate/operation/get_check_status"
+        },
+        {
+          "type": "link",
+          "label": "GET /checks",
+          "href": "/docs/restapi#tag/crate/operation/get_checks"
+        },
+        {
+          "type": "link",
+          "label": "GET /performance-data/{target_check}",
+          "href": "/docs/restapi#tag/crate/operation/get_performance_data"
+        }
+      ]
+    }
+  ]
+}
