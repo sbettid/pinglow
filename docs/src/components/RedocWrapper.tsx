@@ -52,7 +52,7 @@ export default function RedocWrapper(): ReactNode {
 
     return (
         <RedocStandalone
-            specUrl="/openapi.json"
+            specUrl="/pinglow/openapi.json"
             options={{
                 nativeScrollbars: true,
                 hideDownloadButton: true,

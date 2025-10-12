@@ -33,7 +33,7 @@ jobs:
 
       - name: Generate dyanmic openapi menu
         working-directory: docs
-        run: npm run generate-sidebars
+        run: npx ts-node-esm src/scripts/generateOpenapiMenu.mts
 
       - name: Build the doc
         working-directory: docs
