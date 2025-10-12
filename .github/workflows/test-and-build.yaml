@@ -3,7 +3,7 @@ name: Build and Push Docker Image on Tag
 on:
   push:
     tags:
-      - "v*" # Matches tags like v1.0.0
+      - "v*"
 
 env:
   BINARY_NAME: pinglow
@@ -88,9 +88,9 @@ jobs:
             -t ghcr.io/${{ github.repository }}:${{ env.VERSION }} \
             --push \
             -f ./Dockerfile.multiarch .
-  doc-ci:
+  build-doc:
     runs-on: ubuntu-latest
-
+   
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -115,9 +115,25 @@ jobs:
         working-directory: docs
         run: npm run build
 
-      - name: Deploy to GitHub Pages
-        env:
-          GIT_USER: github-actions
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        working-directory: docs
-        run: npx docusaurus deploy
+      - name: Upload Build Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/build
+
+    deploy:
+      name: Deploy to GitHub Pages
+      needs: build-doc
+
+      permissions:
+        pages: write
+        id-token: write
+
+      environment:
+        name: github-pages
+        url: ${{ steps.deployment.outputs.page_url }}
+
+      runs-on: ubuntu-latest
+      steps:
+        - name: Deploy to GitHub Pages
+          id: deployment
+          uses: actions/deploy-pages@v4
