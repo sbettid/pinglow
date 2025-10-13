@@ -123,7 +123,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     match  http_client.post(&url).form(&[
                         ("chat_id", channel.chat_id.clone()),
-                        ("text", format!("<b>Date</b>: {0}<br><b>Check name</b>: {1} <br><b>Status</b>: {2:?}<br><b>Output<b><br>{3}", timestamp_local.format("%Y-%m-%d %H:%M:%S %Z"), result.check_name, result.status, result.get_output())),
+                        ("text", format!("<b>Date</b>: {0}\n<b>Check name</b>: {1} \n<b>Status</b>: {2:?}\n<b>Output</b>\n<pre>{3}</pre>", timestamp_local.format("%Y-%m-%d %H:%M:%S %Z"), result.check_name, result.status, result.get_output())),
                         ("parse_mode", "HTML".to_string()),
                     ]).send().await {
                         Ok(_) => {},

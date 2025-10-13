@@ -16,4 +16,4 @@ spec:
   botTokenRef: "main-channel-token"
 ```
 
-For more definition about the specific properties please see the [CRDs definition](helm-charts/pinglow/templates/custom-rd.yaml).
+For more definition about the specific properties please see the [CRDs definition](https://github.com/sbettid/pinglow/blob/main/helm-charts/pinglow/templates/custom-rd.yaml).
