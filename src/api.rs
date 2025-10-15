@@ -4,22 +4,25 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
+use kube::Api;
 use log::warn;
 use rocket::{
     get,
     http::Status,
+    put,
     request::{FromRequest, Outcome},
+    response::status,
     routes,
     serde::json::Json,
     Request, Rocket, Shutdown, State,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokio_postgres::Client;
 use utoipa::{OpenApi, ToSchema};
 
 use crate::{
-    check::{CheckResultStatus, RunnableCheck, ScriptLanguage, SharedRunnableChecks},
+    check::{Check, CheckResultStatus, RunnableCheck, ScriptLanguage, SharedRunnableChecks},
     config::PinglowConfig,
     error,
 };
@@ -211,6 +214,89 @@ pub async fn get_performance_data(
         .collect();
 
     Some(Json(map))
+}
+
+#[utoipa::path(
+    put,
+    path = "/check/{target_check}/mute?<until>",
+     params(
+        ("target_check" = String, Path, description = "The check we would like to mute")
+    ),
+    responses(
+        (status = 200, description = "Whether the mute operation was successful")
+    )
+)]
+#[put("/check/<target_check>/mute?<until>")]
+pub async fn mute_check(
+    _key: ApiKey,
+    checks: &State<SharedRunnableChecks>,
+    pinglow_config: &State<PinglowConfig>,
+    target_check: &str,
+    until: Option<String>,
+) -> Result<(), status::Custom<String>> {
+    // Read actual shared checks
+    let runnable_checks = checks.read().await;
+
+    // Ensure we can find the target check
+    runnable_checks
+        .iter()
+        .find(|&check| check.0 == target_check)
+        .ok_or(status::Custom(
+            Status::NotFound,
+            "Invalid target check".into(),
+        ))?;
+
+    // Prepare the patch object
+    let mut patch = serde_json::json!({
+        "spec": {
+            "mute": true
+        }
+    });
+
+    // If until is specified try to parse it and set it in the patch object
+    if let Some(until) = until {
+        match chrono::DateTime::parse_from_rfc3339(&until) {
+            Ok(until) => {
+                if let Some(spec) = patch.get_mut("spec").and_then(Value::as_object_mut) {
+                    spec.insert(
+                        "muteNotificationsUntil".to_string(),
+                        json!(until.to_rfc3339()),
+                    );
+                }
+            }
+            Err(e) => {
+                return Err(status::Custom(
+                    Status::BadRequest,
+                    format!("Invalid datetime format: {e}"),
+                ))
+            }
+        }
+    }
+
+    // Get the checks Kube Api
+    let client = kube::Client::try_default().await.map_err(|e| {
+        status::Custom(
+            Status::InternalServerError,
+            format!("Error retrieving the Kube client: {e}"),
+        )
+    })?;
+    let checks: Api<Check> = Api::namespaced(client.clone(), &pinglow_config.target_namespace);
+
+    checks
+        .patch(
+            target_check,
+            &kube::api::PatchParams::apply("pinglow"),
+            &kube::api::Patch::Merge(&patch),
+        )
+        .await
+        .map_err(|e| {
+            status::Custom(
+                Status::InternalServerError,
+                format!("Error setting mute status: {e}"),
+            )
+        })?;
+
+    Ok(())
 }
 
 #[derive(OpenApi)]

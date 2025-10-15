@@ -164,6 +164,8 @@ async fn run_check_as_kube_job(
         CheckResult::map_to_check_error(
             check_name,
             format!("Error when creating the Kubernetes client: {e:?}"),
+            check.mute_notifications,
+            check.mute_notifications_until,
         )
     })?;
 
@@ -192,6 +194,8 @@ async fn run_check_as_kube_job(
             CheckResult::map_to_check_error(
                 check_name,
                 format!("Error when creating the Kubernetes job: {e:?}"),
+                check.mute_notifications,
+                check.mute_notifications_until,
             )
         })?;
 
@@ -206,17 +210,26 @@ async fn run_check_as_kube_job(
         CheckResult::map_to_check_error(
             check_name,
             format!("Error when retrieving the pods list: {e:?}"),
+            check.mute_notifications,
+            check.mute_notifications_until,
         )
     })?;
 
     let pod = pod_list.items.into_iter().next().ok_or_else(|| {
-        CheckResult::map_to_check_error(check_name, format!("Cannot find pod for job {job_name}"))
+        CheckResult::map_to_check_error(
+            check_name,
+            format!("Cannot find pod for job {job_name}"),
+            check.mute_notifications,
+            check.mute_notifications_until,
+        )
     })?;
 
     let pod_name = pod.metadata.name.clone().ok_or_else(|| {
         CheckResult::map_to_check_error(
             check_name,
             format!("Error getting pod name from pod {pod:?}"),
+            check.mute_notifications,
+            check.mute_notifications_until,
         )
     })?;
 
@@ -225,7 +238,12 @@ async fn run_check_as_kube_job(
         .logs(&pod_name, &Default::default())
         .await
         .map_err(|e| {
-            CheckResult::map_to_check_error(check_name, format!("Cannot get pod logs: {e:?}"))
+            CheckResult::map_to_check_error(
+                check_name,
+                format!("Cannot get pod logs: {e:?}"),
+                check.mute_notifications,
+                check.mute_notifications_until,
+            )
         })?;
 
     // Get the exit code of the pod
@@ -255,5 +273,7 @@ async fn run_check_as_kube_job(
         status: map_command_exit_code_to_check_result(*exit_code),
         timestamp: None,
         telegram_channels: check.telegram_channels.clone().into(),
+        mute_notifications: check.mute_notifications,
+        mute_notifications_until: check.mute_notifications_until,
     })
 }
