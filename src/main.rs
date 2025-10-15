@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use chrono::Local;
+use chrono::{Local, Utc};
 use dashmap::DashMap;
 use env_logger::{self, Builder};
 use log::{error, info};
@@ -114,7 +114,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 result.write_to_db(client_arc.clone()).await?;
 
                 // Send result to telegram channels
-                if result.status != CheckResultStatus::Ok {
+                if result.status != CheckResultStatus::Ok &&
+                match result.mute_notifications {
+                    Some(true) => {
+                        match result.mute_notifications_until {
+                            Some(until) => until <= Utc::now(), // check if mute until is still valid
+                            None => false,                      // muted forever: don't send
+                        }
+                    }
+                    _ => true, // if mute_notifications is None or false we send the notification
+                }
+
+                {
 
                     for channel in result.telegram_channels.iter() {
 
