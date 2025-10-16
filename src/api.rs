@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use kube::Api;
 use log::warn;
 use rocket::{
-    get,
+    delete, get,
     http::Status,
     put,
     request::{FromRequest, Outcome},
@@ -42,7 +42,13 @@ pub async fn start_rocket(
         .manage(client)
         .mount(
             "/",
-            routes![get_checks, get_check_status, get_performance_data],
+            routes![
+                get_checks,
+                get_check_status,
+                get_performance_data,
+                mute_check,
+                unmute_check
+            ],
         );
 
     let rocket = rocket.ignite().await?;
@@ -102,6 +108,8 @@ pub struct SimpleCheckResultDto {
     pub output: String,
     pub status: CheckResultStatus,
     pub timestamp: Option<DateTime<Utc>>,
+    pub notifications_muted: Option<bool>,
+    pub notifications_muted_until: Option<DateTime<Utc>>,
 }
 
 #[utoipa::path(
@@ -143,7 +151,7 @@ pub async fn get_check_status(
 ) -> Option<Json<SimpleCheckResultDto>> {
     let runnable_checks = checks.read().await;
 
-    runnable_checks
+    let (_, check) = runnable_checks
         .iter()
         .find(|&check| check.0 == target_check)?;
 
@@ -154,6 +162,8 @@ pub async fn get_check_status(
         output: last_check_result.get("output"),
         status: crate::check::CheckResultStatus::from(check_status),
         timestamp: last_check_result.get("timestamp"),
+        notifications_muted: check.mute_notifications,
+        notifications_muted_until: check.mute_notifications_until,
     }))
 }
 
@@ -249,7 +259,7 @@ pub async fn mute_check(
     // Prepare the patch object
     let mut patch = serde_json::json!({
         "spec": {
-            "mute": true
+            "muteNotifications": true
         }
     });
 
@@ -293,6 +303,69 @@ pub async fn mute_check(
             status::Custom(
                 Status::InternalServerError,
                 format!("Error setting mute status: {e}"),
+            )
+        })?;
+
+    Ok(())
+}
+
+#[utoipa::path(
+    delete,
+    path = "/check/{target_check}/mute",
+     params(
+        ("target_check" = String, Path, description = "The check we would like to unmute")
+    ),
+    responses(
+        (status = 200, description = "Whether the unmute operation was successful")
+    )
+)]
+#[delete("/check/<target_check>/mute")]
+pub async fn unmute_check(
+    _key: ApiKey,
+    checks: &State<SharedRunnableChecks>,
+    pinglow_config: &State<PinglowConfig>,
+    target_check: &str,
+) -> Result<(), status::Custom<String>> {
+    // Read actual shared checks
+    let runnable_checks = checks.read().await;
+
+    // Ensure we can find the target check
+    runnable_checks
+        .iter()
+        .find(|&check| check.0 == target_check)
+        .ok_or(status::Custom(
+            Status::NotFound,
+            "Invalid target check".into(),
+        ))?;
+
+    // Prepare the patch object
+    let patch = serde_json::json!({
+        "spec": {
+            "muteNotifications": false,
+            "muteNotificationsUntil": null
+        }
+    });
+
+    // Get the checks Kube Api
+    let client = kube::Client::try_default().await.map_err(|e| {
+        status::Custom(
+            Status::InternalServerError,
+            format!("Error retrieving the Kube client: {e}"),
+        )
+    })?;
+    let checks: Api<Check> = Api::namespaced(client.clone(), &pinglow_config.target_namespace);
+
+    checks
+        .patch(
+            target_check,
+            &kube::api::PatchParams::apply("pinglow"),
+            &kube::api::Patch::Merge(&patch),
+        )
+        .await
+        .map_err(|e| {
+            status::Custom(
+                Status::InternalServerError,
+                format!("Error setting unmute status: {e}"),
             )
         })?;
 
