@@ -3,7 +3,7 @@ use std::{
     sync::Arc,
 };
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, FixedOffset, Utc};
 use kube::Api;
 use log::warn;
 use rocket::{
@@ -85,7 +85,7 @@ impl<'r> FromRequest<'r> for ApiKey {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, ToSchema, Debug)]
 pub struct SimpleCheckDto {
     pub check_name: String,
     pub interval: u64,
@@ -245,7 +245,7 @@ pub async fn mute_check(
     until: Option<String>,
 ) -> Result<(), status::Custom<String>> {
     // Read actual shared checks
-    let runnable_checks = checks.read().await;
+    let mut runnable_checks = checks.write().await;
 
     // Ensure we can find the target check
     runnable_checks
@@ -264,9 +264,11 @@ pub async fn mute_check(
     });
 
     // If until is specified try to parse it and set it in the patch object
+    let mut until_date_time: Option<DateTime<FixedOffset>> = None;
     if let Some(until) = until {
         match chrono::DateTime::parse_from_rfc3339(&until) {
             Ok(until) => {
+                until_date_time = Some(until);
                 if let Some(spec) = patch.get_mut("spec").and_then(Value::as_object_mut) {
                     spec.insert(
                         "muteNotificationsUntil".to_string(),
@@ -290,9 +292,9 @@ pub async fn mute_check(
             format!("Error retrieving the Kube client: {e}"),
         )
     })?;
-    let checks: Api<Check> = Api::namespaced(client.clone(), &pinglow_config.target_namespace);
+    let checks_api: Api<Check> = Api::namespaced(client.clone(), &pinglow_config.target_namespace);
 
-    checks
+    checks_api
         .patch(
             target_check,
             &kube::api::PatchParams::apply("pinglow"),
@@ -305,6 +307,19 @@ pub async fn mute_check(
                 format!("Error setting mute status: {e}"),
             )
         })?;
+
+    let check = runnable_checks.get(target_check);
+
+    if let Some(check) = check {
+        let mut modified_check = (**check).clone();
+        modified_check.mute_notifications = Some(true);
+
+        if let Some(until_date_time) = until_date_time {
+            modified_check.mute_notifications_until = Some(until_date_time.into());
+        }
+
+        runnable_checks.insert(target_check.to_string(), Arc::new(modified_check));
+    }
 
     Ok(())
 }
@@ -327,7 +342,7 @@ pub async fn unmute_check(
     target_check: &str,
 ) -> Result<(), status::Custom<String>> {
     // Read actual shared checks
-    let runnable_checks = checks.read().await;
+    let mut runnable_checks = checks.write().await;
 
     // Ensure we can find the target check
     runnable_checks
@@ -353,9 +368,9 @@ pub async fn unmute_check(
             format!("Error retrieving the Kube client: {e}"),
         )
     })?;
-    let checks: Api<Check> = Api::namespaced(client.clone(), &pinglow_config.target_namespace);
+    let checks_api: Api<Check> = Api::namespaced(client.clone(), &pinglow_config.target_namespace);
 
-    checks
+    checks_api
         .patch(
             target_check,
             &kube::api::PatchParams::apply("pinglow"),
@@ -368,6 +383,16 @@ pub async fn unmute_check(
                 format!("Error setting unmute status: {e}"),
             )
         })?;
+
+    let check = runnable_checks.get(target_check);
+
+    if let Some(check) = check {
+        let mut modified_check = (**check).clone();
+        modified_check.mute_notifications = Some(false);
+        modified_check.mute_notifications_until = None;
+
+        runnable_checks.insert(target_check.to_string(), Arc::new(modified_check));
+    }
 
     Ok(())
 }
