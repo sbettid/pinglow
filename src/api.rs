@@ -3,23 +3,29 @@ use std::{
     sync::Arc,
 };
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, FixedOffset, Utc};
+use kube::Api;
 use log::warn;
 use rocket::{
-    get,
+    delete, get,
     http::Status,
+    put,
     request::{FromRequest, Outcome},
+    response::status,
     routes,
     serde::json::Json,
     Request, Rocket, Shutdown, State,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use tokio_postgres::Client;
-use utoipa::{OpenApi, ToSchema};
+use utoipa::{
+    openapi::security::{ApiKeyValue, SecurityScheme},
+    Modify, OpenApi, ToSchema,
+};
 
 use crate::{
-    check::{CheckResultStatus, RunnableCheck, ScriptLanguage, SharedRunnableChecks},
+    check::{Check, CheckResultStatus, RunnableCheck, ScriptLanguage, SharedRunnableChecks},
     config::PinglowConfig,
     error,
 };
@@ -39,7 +45,13 @@ pub async fn start_rocket(
         .manage(client)
         .mount(
             "/",
-            routes![get_checks, get_check_status, get_performance_data],
+            routes![
+                get_checks,
+                get_check_status,
+                get_performance_data,
+                mute_check,
+                unmute_check
+            ],
         );
 
     let rocket = rocket.ignite().await?;
@@ -76,7 +88,7 @@ impl<'r> FromRequest<'r> for ApiKey {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, ToSchema, Debug)]
 pub struct SimpleCheckDto {
     pub check_name: String,
     pub interval: u64,
@@ -99,6 +111,8 @@ pub struct SimpleCheckResultDto {
     pub output: String,
     pub status: CheckResultStatus,
     pub timestamp: Option<DateTime<Utc>>,
+    pub notifications_muted: Option<bool>,
+    pub notifications_muted_until: Option<DateTime<Utc>>,
 }
 
 #[utoipa::path(
@@ -140,7 +154,7 @@ pub async fn get_check_status(
 ) -> Option<Json<SimpleCheckResultDto>> {
     let runnable_checks = checks.read().await;
 
-    runnable_checks
+    let (_, check) = runnable_checks
         .iter()
         .find(|&check| check.0 == target_check)?;
 
@@ -151,6 +165,8 @@ pub async fn get_check_status(
         output: last_check_result.get("output"),
         status: crate::check::CheckResultStatus::from(check_status),
         timestamp: last_check_result.get("timestamp"),
+        notifications_muted: check.mute_notifications,
+        notifications_muted_until: check.mute_notifications_until,
     }))
 }
 
@@ -213,9 +229,180 @@ pub async fn get_performance_data(
     Some(Json(map))
 }
 
+#[utoipa::path(
+    put,
+    path = "/check/{target_check}/mute?<until>",
+     params(
+        ("target_check" = String, Path, description = "The check we would like to mute")
+    ),
+    responses(
+        (status = 200, description = "Whether the mute operation was successful")
+    )
+)]
+#[put("/check/<target_check>/mute?<until>")]
+pub async fn mute_check(
+    _key: ApiKey,
+    checks: &State<SharedRunnableChecks>,
+    pinglow_config: &State<PinglowConfig>,
+    target_check: &str,
+    until: Option<String>,
+) -> Result<(), status::Custom<String>> {
+    // Read actual shared checks
+    let mut runnable_checks = checks.write().await;
+
+    // Ensure we can find the target check
+    runnable_checks
+        .iter()
+        .find(|&check| check.0 == target_check)
+        .ok_or(status::Custom(
+            Status::NotFound,
+            "Invalid target check".into(),
+        ))?;
+
+    // Prepare the patch object
+    let mut patch = serde_json::json!({
+        "spec": {
+            "muteNotifications": true
+        }
+    });
+
+    // If until is specified try to parse it and set it in the patch object
+    let mut until_date_time: Option<DateTime<FixedOffset>> = None;
+    if let Some(until) = until {
+        match chrono::DateTime::parse_from_rfc3339(&until) {
+            Ok(until) => {
+                until_date_time = Some(until);
+                if let Some(spec) = patch.get_mut("spec").and_then(Value::as_object_mut) {
+                    spec.insert(
+                        "muteNotificationsUntil".to_string(),
+                        json!(until.to_rfc3339()),
+                    );
+                }
+            }
+            Err(e) => {
+                return Err(status::Custom(
+                    Status::BadRequest,
+                    format!("Invalid datetime format: {e}"),
+                ))
+            }
+        }
+    }
+
+    // Get the checks Kube Api
+    let client = kube::Client::try_default().await.map_err(|e| {
+        status::Custom(
+            Status::InternalServerError,
+            format!("Error retrieving the Kube client: {e}"),
+        )
+    })?;
+    let checks_api: Api<Check> = Api::namespaced(client.clone(), &pinglow_config.target_namespace);
+
+    checks_api
+        .patch(
+            target_check,
+            &kube::api::PatchParams::apply("pinglow"),
+            &kube::api::Patch::Merge(&patch),
+        )
+        .await
+        .map_err(|e| {
+            status::Custom(
+                Status::InternalServerError,
+                format!("Error setting mute status: {e}"),
+            )
+        })?;
+
+    let check = runnable_checks.get(target_check);
+
+    if let Some(check) = check {
+        let mut modified_check = (**check).clone();
+        modified_check.mute_notifications = Some(true);
+
+        if let Some(until_date_time) = until_date_time {
+            modified_check.mute_notifications_until = Some(until_date_time.into());
+        }
+
+        runnable_checks.insert(target_check.to_string(), Arc::new(modified_check));
+    }
+
+    Ok(())
+}
+
+#[utoipa::path(
+    delete,
+    path = "/check/{target_check}/mute",
+     params(
+        ("target_check" = String, Path, description = "The check we would like to unmute")
+    ),
+    responses(
+        (status = 200, description = "Whether the unmute operation was successful")
+    )
+)]
+#[delete("/check/<target_check>/mute")]
+pub async fn unmute_check(
+    _key: ApiKey,
+    checks: &State<SharedRunnableChecks>,
+    pinglow_config: &State<PinglowConfig>,
+    target_check: &str,
+) -> Result<(), status::Custom<String>> {
+    // Read actual shared checks
+    let mut runnable_checks = checks.write().await;
+
+    // Ensure we can find the target check
+    runnable_checks
+        .iter()
+        .find(|&check| check.0 == target_check)
+        .ok_or(status::Custom(
+            Status::NotFound,
+            "Invalid target check".into(),
+        ))?;
+
+    // Prepare the patch object
+    let patch = serde_json::json!({
+        "spec": {
+            "muteNotifications": false,
+            "muteNotificationsUntil": null
+        }
+    });
+
+    // Get the checks Kube Api
+    let client = kube::Client::try_default().await.map_err(|e| {
+        status::Custom(
+            Status::InternalServerError,
+            format!("Error retrieving the Kube client: {e}"),
+        )
+    })?;
+    let checks_api: Api<Check> = Api::namespaced(client.clone(), &pinglow_config.target_namespace);
+
+    checks_api
+        .patch(
+            target_check,
+            &kube::api::PatchParams::apply("pinglow"),
+            &kube::api::Patch::Merge(&patch),
+        )
+        .await
+        .map_err(|e| {
+            status::Custom(
+                Status::InternalServerError,
+                format!("Error setting unmute status: {e}"),
+            )
+        })?;
+
+    let check = runnable_checks.get(target_check);
+
+    if let Some(check) = check {
+        let mut modified_check = (**check).clone();
+        modified_check.mute_notifications = Some(false);
+        modified_check.mute_notifications_until = None;
+
+        runnable_checks.insert(target_check.to_string(), Arc::new(modified_check));
+    }
+
+    Ok(())
+}
+
 #[derive(OpenApi)]
 #[openapi(
-    paths(get_checks, get_check_status, get_performance_data),
+    paths(get_checks, get_check_status, get_performance_data, mute_check, unmute_check),
     components(schemas(
         SimpleCheckDto,
         SimpleCheckResultDto,
@@ -227,6 +414,29 @@ pub async fn get_performance_data(
         version = "1.0.0",
         license(name = "MIT", url = "https://opensource.org/licenses/MIT"),
         description = "The RestAPI to interact with Pinglow"
+    ),
+    modifiers(&SecurityAddon),
+    security(
+        ("api_key" = [])
     )
 )]
 pub struct ApiDoc;
+
+// Add bearer auth security scheme
+struct SecurityAddon;
+
+impl Modify for SecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        openapi
+            .components
+            .as_mut()
+            .unwrap()
+            .security_schemes
+            .insert(
+                "api_key".to_string(),
+                SecurityScheme::ApiKey(utoipa::openapi::security::ApiKey::Header(
+                    ApiKeyValue::new("x-api-key"),
+                )),
+            );
+    }
+}

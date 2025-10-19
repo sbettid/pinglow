@@ -19,7 +19,7 @@ def generate_sidebar(openapi: dict) -> dict:
 
             operation_id = operation.get("operationId") or f"{method}_{path_key.replace('/', '_').replace('{', '_').replace('}', '_')}"
             label = sanitize_label(operation.get("summary")) if operation.get("summary") else f"{method.upper()} {path_key}"
-            href = f"/docs/restapi#tag/crate/operation/{operation_id}"
+            href = f"/docs/restapi#operation/{operation_id}"
 
             items.append({
                 "type": "link",

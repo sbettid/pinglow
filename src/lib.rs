@@ -84,6 +84,8 @@ pub async fn load_single_runnable_check(
         secrets_refs: secrets_refs.clone(),
         python_requirements: python_requirements.clone(),
         telegram_channels,
+        mute_notifications: check.spec.muteNotifications,
+        mute_notifications_until: check.spec.muteNotificationsUntil,
     };
 
     Ok(runnable_check)

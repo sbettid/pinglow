@@ -78,6 +78,8 @@ pub struct CheckResult {
     pub status: CheckResultStatus,
     pub timestamp: Option<DateTime<Utc>>,
     pub telegram_channels: Arc<[ConcreteTelegramChannel]>,
+    pub mute_notifications: Option<bool>,
+    pub mute_notifications_until: Option<DateTime<Utc>>,
 }
 
 impl CheckResult {
@@ -85,13 +87,20 @@ impl CheckResult {
         self.timestamp = Some(timestamp);
     }
 
-    pub fn map_to_check_error(check_name: &String, error_message: String) -> Self {
+    pub fn map_to_check_error(
+        check_name: &String,
+        error_message: String,
+        mute_notifications: Option<bool>,
+        mute_notifications_until: Option<DateTime<Utc>>,
+    ) -> Self {
         Self {
             check_name: check_name.to_string(),
             output: error_message,
             status: CheckResultStatus::CheckError,
             timestamp: None,
             telegram_channels: Arc::from(&[][..]),
+            mute_notifications,
+            mute_notifications_until,
         }
     }
 
@@ -197,6 +206,8 @@ pub struct CheckSpec {
     pub interval: u64,
     pub secretRefs: Option<Vec<String>>,
     pub telegramChannelRefs: Option<Vec<String>>,
+    pub muteNotifications: Option<bool>,
+    pub muteNotificationsUntil: Option<DateTime<Utc>>,
 }
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
@@ -221,6 +232,8 @@ pub struct RunnableCheck {
     pub secrets_refs: Option<Vec<String>>,
     pub python_requirements: Option<Vec<String>>,
     pub telegram_channels: Vec<ConcreteTelegramChannel>,
+    pub mute_notifications: Option<bool>,
+    pub mute_notifications_until: Option<DateTime<Utc>>,
 }
 
 #[derive(Clone, Debug)]
