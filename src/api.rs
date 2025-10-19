@@ -19,7 +19,10 @@ use rocket::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio_postgres::Client;
-use utoipa::{OpenApi, ToSchema};
+use utoipa::{
+    openapi::security::{ApiKeyValue, SecurityScheme},
+    Modify, OpenApi, ToSchema,
+};
 
 use crate::{
     check::{Check, CheckResultStatus, RunnableCheck, ScriptLanguage, SharedRunnableChecks},
@@ -399,7 +402,7 @@ pub async fn unmute_check(
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(get_checks, get_check_status, get_performance_data),
+    paths(get_checks, get_check_status, get_performance_data, mute_check, unmute_check),
     components(schemas(
         SimpleCheckDto,
         SimpleCheckResultDto,
@@ -411,6 +414,29 @@ pub async fn unmute_check(
         version = "1.0.0",
         license(name = "MIT", url = "https://opensource.org/licenses/MIT"),
         description = "The RestAPI to interact with Pinglow"
+    ),
+    modifiers(&SecurityAddon),
+    security(
+        ("api_key" = [])
     )
 )]
 pub struct ApiDoc;
+
+// Add bearer auth security scheme
+struct SecurityAddon;
+
+impl Modify for SecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        openapi
+            .components
+            .as_mut()
+            .unwrap()
+            .security_schemes
+            .insert(
+                "api_key".to_string(),
+                SecurityScheme::ApiKey(utoipa::openapi::security::ApiKey::Header(
+                    ApiKeyValue::new("x-api-key"),
+                )),
+            );
+    }
+}

@@ -8,17 +8,27 @@
         {
           "type": "link",
           "label": "GET /check-status/{target_check}",
-          "href": "/docs/restapi#tag/crate/operation/get_check_status"
+          "href": "/docs/restapi#operation/get_check_status"
+        },
+        {
+          "type": "link",
+          "label": "DELETE /check/{target_check}/mute",
+          "href": "/docs/restapi#operation/unmute_check"
+        },
+        {
+          "type": "link",
+          "label": "PUT /check/{target_check}/mute?<until>",
+          "href": "/docs/restapi#operation/mute_check"
         },
         {
           "type": "link",
           "label": "GET /checks",
-          "href": "/docs/restapi#tag/crate/operation/get_checks"
+          "href": "/docs/restapi#operation/get_checks"
         },
         {
           "type": "link",
           "label": "GET /performance-data/{target_check}",
-          "href": "/docs/restapi#tag/crate/operation/get_performance_data"
+          "href": "/docs/restapi#operation/get_performance_data"
         }
       ]
     }
