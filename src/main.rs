@@ -4,6 +4,7 @@ use std::sync::Arc;
 use chrono::{Local, Utc};
 use dashmap::DashMap;
 use env_logger::{self, Builder};
+use html_escape::encode_safe;
 use log::{error, info};
 use pinglow::check::{Check, CheckResult};
 use pinglow::load_single_runnable_check;
@@ -128,13 +129,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 {
 
                     for channel in result.telegram_channels.iter() {
-
                     let url = format!("https://api.telegram.org/bot{}/sendMessage", channel.bot_token);
                     let timestamp_local = result.timestamp.unwrap().with_timezone(&Local);
 
                     match  http_client.post(&url).form(&[
                         ("chat_id", channel.chat_id.clone()),
-                        ("text", format!("<b>Date</b>: {0}\n<b>Check name</b>: {1} \n<b>Status</b>: {2:?}\n<b>Output</b>\n<pre>{3}</pre>", timestamp_local.format("%Y-%m-%d %H:%M:%S %Z"), result.check_name, result.status, result.get_output())),
+                        ("text", format!("<b>Date</b>: {0}\n<b>Check name</b>: {1} \n<b>Status</b>: {2:?}\n<b>Output</b>\n<pre>{3}</pre>", timestamp_local.format("%Y-%m-%d %H:%M:%S %Z"), result.check_name, result.status, encode_safe(&result.get_output()))),
                         ("parse_mode", "HTML".to_string()),
                     ]).send().await {
                         Ok(_) => {},

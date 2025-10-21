@@ -24,6 +24,7 @@ reqwest = "0.12"
 openssl = { version = "0.10", features = ["vendored"] }
 dashmap = "6.1.0"
 utoipa = {version = "5", features = ["chrono"]}
+html-escape = "0.2"
 
 [dev-dependencies]
 rustfmt = "0.10.0"
