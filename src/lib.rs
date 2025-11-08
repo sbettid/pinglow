@@ -2,7 +2,7 @@ use k8s_openapi::api::core::v1::Secret;
 use kube::{Api, Client};
 
 use crate::{
-    check::{Check, ConcreteTelegramChannel, RunnableCheck, Script, TelegramChannel},
+    check::{Check, ConcreteTelegramChannel, PinglowCheck, Script, TelegramChannel},
     config::PinglowConfig,
     error::ReconcileError,
 };
@@ -19,7 +19,7 @@ pub async fn load_single_runnable_check(
     check: &Check,
     client: &Client,
     config: &PinglowConfig,
-) -> Result<RunnableCheck, ReconcileError> {
+) -> Result<PinglowCheck, ReconcileError> {
     let scripts: Api<Script> = Api::namespaced(client.clone(), &config.target_namespace);
 
     let secrets: Api<Secret> = Api::namespaced(client.clone(), &config.target_namespace);
@@ -38,11 +38,16 @@ pub async fn load_single_runnable_check(
         .unwrap_or("Unnamed check".to_string());
 
     // Retrieve the corresponding script
-    let script = scripts
-        .get(script_name)
-        .await
-        .map_err(|_| ReconcileError::ScriptNotFound(script_name.clone()))?;
+    let mut script = None;
 
+    if let Some(script_name) = script_name {
+        script = Some(
+            scripts
+                .get(script_name)
+                .await
+                .map_err(|_| ReconcileError::ScriptNotFound(script_name.clone()))?,
+        );
+    }
     let mut telegram_channels = vec![];
 
     if let Some(channels) = &check.spec.telegramChannelRefs {
@@ -73,16 +78,13 @@ pub async fn load_single_runnable_check(
 
     let secrets_refs = &check.spec.secretRefs;
 
-    let python_requirements = &script.spec.python_requirements;
-
     // Build the runnable check object
-    let runnable_check = RunnableCheck {
-        script: script.spec.content,
+    let runnable_check = PinglowCheck {
+        passive: check.spec.passive,
+        script: script.and_then(|s| Some(s.spec)),
         interval: check.spec.interval,
-        language: script.spec.language,
         check_name,
         secrets_refs: secrets_refs.clone(),
-        python_requirements: python_requirements.clone(),
         telegram_channels,
         mute_notifications: check.spec.muteNotifications,
         mute_notifications_until: check.spec.muteNotificationsUntil,

@@ -25,7 +25,7 @@ use utoipa::{
 };
 
 use crate::{
-    check::{Check, CheckResultStatus, RunnableCheck, ScriptLanguage, SharedRunnableChecks},
+    check::{Check, CheckResultStatus, PinglowCheck, ScriptLanguage, SharedRunnableChecks},
     config::PinglowConfig,
     error,
 };
@@ -91,16 +91,16 @@ impl<'r> FromRequest<'r> for ApiKey {
 #[derive(Serialize, ToSchema, Debug)]
 pub struct SimpleCheckDto {
     pub check_name: String,
-    pub interval: u64,
-    pub language: ScriptLanguage,
+    pub interval: Option<u64>,
+    pub language: Option<ScriptLanguage>,
 }
 
-impl From<&Arc<RunnableCheck>> for SimpleCheckDto {
-    fn from(value: &Arc<RunnableCheck>) -> Self {
+impl From<&Arc<PinglowCheck>> for SimpleCheckDto {
+    fn from(value: &Arc<PinglowCheck>) -> Self {
         Self {
             check_name: value.check_name.clone(),
             interval: value.interval,
-            language: value.language.clone(),
+            language: value.as_ref().script.as_ref().map(|c| c.language.clone()),
         }
     }
 }

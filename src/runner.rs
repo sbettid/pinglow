@@ -19,13 +19,13 @@ use tokio::select;
 use tokio::{sync::mpsc, time::Instant};
 
 use crate::check::SharedRunnableChecks;
-use crate::check::{self, RunnableCheck, ScheduledCheck};
+use crate::check::{self, PinglowCheck, ScheduledCheck};
 use crate::job::build_bash_job;
 use crate::job::build_python_job;
 use crate::job::is_job_finished;
 
 pub enum RunnableCheckEvent {
-    AddOrUpdate(Arc<RunnableCheck>),
+    AddOrUpdate(Arc<PinglowCheck>),
     Remove(String), // check_name
 }
 
@@ -40,7 +40,20 @@ async fn handle_check_event(
     match event {
         RunnableCheckEvent::AddOrUpdate(check) => {
             let check_name = check.check_name.clone();
-            let next_run = Instant::now() + Duration::from_secs(check.interval);
+
+            // Skip putting in queue passive checks
+            if check.passive {
+                return;
+            }
+
+            // Skip check where check interval is node defined (should not happen though)
+            let interval = if let Some(interval) = check.interval {
+                interval
+            } else {
+                return;
+            };
+
+            let next_run = Instant::now() + Duration::from_secs(interval);
 
             shared_checks
                 .write()
@@ -96,7 +109,12 @@ pub async fn scheduler_loop(
                         continue; // Skip deleted check
                     }
 
-                    let check_interval = Duration::from_secs(scheduled_check.check.interval);
+                    // Skip checks if interval is not defined
+                    let check_interval = if let Some(interval) = scheduled_check.check.interval {
+                        Duration::from_secs(interval)
+                    } else {
+                        continue;
+                    };
 
                     // Remove the check since it is being executed
                     queue.retain(|_i, check_in_queue| check_in_queue.check.check_name != scheduled_check.check.check_name);
@@ -123,7 +141,7 @@ pub async fn scheduler_loop(
  * This function runs a check, parses the result to a check result and returns it to the main thread
  */
 pub async fn run_check(
-    check: Arc<RunnableCheck>,
+    check: Arc<PinglowCheck>,
     result_tx: mpsc::Sender<CheckResult>,
     namespace: String,
 ) {
@@ -148,14 +166,27 @@ pub async fn run_check(
  * This function runs a check as a Kubernetes job
  */
 async fn run_check_as_kube_job(
-    check: Arc<RunnableCheck>,
+    check: Arc<PinglowCheck>,
     namespace: String,
 ) -> Result<CheckResult, CheckResult> {
     let check_name = &check.check_name;
+
+    // If there is no script we early return an error, although this should not happend
+    let script = if let Some(script) = &check.script {
+        script
+    } else {
+        return Err(CheckResult::map_to_check_error(
+            check_name,
+            "Check was about to be executed but no script was found!".to_owned(),
+            check.mute_notifications,
+            check.mute_notifications_until,
+        ));
+    };
+
     // Create the job name
     let job_name = format!(
         "{}-check-{}-{}",
-        check.language,
+        script.language,
         check_name,
         Utc::now().format("%Y%m%d%H%M%S")
     );
@@ -170,15 +201,15 @@ async fn run_check_as_kube_job(
     })?;
 
     // Build the job
-    let job = match check.language {
+    let job = match script.language {
         check::ScriptLanguage::Python => build_python_job(
             &job_name,
-            &check.script,
+            &script.content,
             &check.secrets_refs,
-            &check.python_requirements,
+            &script.python_requirements,
         ),
         check::ScriptLanguage::Bash => {
-            build_bash_job(&job_name, &check.script, &check.secrets_refs)
+            build_bash_job(&job_name, &script.content, &check.secrets_refs)
         }
     };
 

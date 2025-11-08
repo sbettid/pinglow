@@ -58,10 +58,10 @@ spec:
           properties:
             spec:
               type: object
-              required:
-                - scriptRef
-                - interval
               properties:
+                passive:
+                  type: boolean
+                  default: false
                 scriptRef:
                   type: string
                 interval:
@@ -83,6 +83,10 @@ spec:
                   type: string
                   format: date-time
                   description: RFC 3339 timestamp indicating when to resume notifications.
+              x-kubernetes-validations:
+                - rule: "(self.passive == false) || (has(self.scriptRef) && has(self.interval))"
+                  message: "An active check must have the scriptRef and interval defined."
+
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
