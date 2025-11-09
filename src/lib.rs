@@ -81,7 +81,7 @@ pub async fn load_single_runnable_check(
     // Build the runnable check object
     let runnable_check = PinglowCheck {
         passive: check.spec.passive,
-        script: script.and_then(|s| Some(s.spec)),
+        script: script.map(|s| s.spec),
         interval: check.spec.interval,
         check_name,
         secrets_refs: secrets_refs.clone(),

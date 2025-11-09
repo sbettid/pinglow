@@ -11,7 +11,7 @@ use tokio_postgres::Client;
 use dashmap::DashMap;
 use utoipa::ToSchema;
 
-pub type SharedRunnableChecks = Arc<RwLock<HashMap<String, Arc<PinglowCheck>>>>;
+pub type SharedPinglowChecks = Arc<RwLock<HashMap<String, Arc<PinglowCheck>>>>;
 pub type SharedChecks = Arc<DashMap<String, Arc<Check>>>;
 
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
@@ -20,6 +20,7 @@ pub enum CheckResultStatus {
     Warning,
     Critical,
     CheckError,
+    Pending,
 }
 
 impl From<i32> for CheckResultStatus {
@@ -28,6 +29,7 @@ impl From<i32> for CheckResultStatus {
             0 => CheckResultStatus::Ok,
             1 => CheckResultStatus::Warning,
             2 => CheckResultStatus::Critical,
+            4 => CheckResultStatus::Pending,
             _ => CheckResultStatus::CheckError,
         }
     }
@@ -39,6 +41,7 @@ impl From<i16> for CheckResultStatus {
             0 => CheckResultStatus::Ok,
             1 => CheckResultStatus::Warning,
             2 => CheckResultStatus::Critical,
+            4 => CheckResultStatus::Pending,
             _ => CheckResultStatus::CheckError,
         }
     }
@@ -51,6 +54,7 @@ impl CheckResultStatus {
             CheckResultStatus::Warning => 1,
             CheckResultStatus::Critical => 2,
             CheckResultStatus::CheckError => 3,
+            CheckResultStatus::Pending => 4,
         }
     }
 }

@@ -92,6 +92,7 @@ async fn reconcile(check: Arc<Check>, ctx: Arc<ContextData>) -> Result<Action, R
             .send(RunnableCheckEvent::Remove(check_name.to_string()))
             .await
             .map_err(|e| {
+                error!("Failed to send event for check {check_name}: {e:?}");
                 ReconcileError::SendError(format!("Error sending the check event {e:?}"))
             })?;
         return Ok(Action::await_change());

@@ -25,14 +25,14 @@ use utoipa::{
 };
 
 use crate::{
-    check::{Check, CheckResultStatus, PinglowCheck, ScriptLanguage, SharedRunnableChecks},
+    check::{Check, CheckResultStatus, PinglowCheck, ScriptLanguage, SharedPinglowChecks},
     config::PinglowConfig,
     error,
 };
 
 pub async fn start_rocket(
     pinglow_config: PinglowConfig,
-    shared_checks: SharedRunnableChecks,
+    shared_checks: SharedPinglowChecks,
     client: Arc<tokio_postgres::Client>,
 ) -> Result<(Rocket<rocket::Ignite>, Shutdown), rocket::Error> {
     let figment = rocket::Config::figment()
@@ -91,6 +91,7 @@ impl<'r> FromRequest<'r> for ApiKey {
 #[derive(Serialize, ToSchema, Debug)]
 pub struct SimpleCheckDto {
     pub check_name: String,
+    pub passive: bool,
     pub interval: Option<u64>,
     pub language: Option<ScriptLanguage>,
 }
@@ -99,6 +100,7 @@ impl From<&Arc<PinglowCheck>> for SimpleCheckDto {
     fn from(value: &Arc<PinglowCheck>) -> Self {
         Self {
             check_name: value.check_name.clone(),
+            passive: value.passive,
             interval: value.interval,
             language: value.as_ref().script.as_ref().map(|c| c.language.clone()),
         }
@@ -108,6 +110,7 @@ impl From<&Arc<PinglowCheck>> for SimpleCheckDto {
 #[derive(Serialize, ToSchema)]
 pub struct SimpleCheckResultDto {
     pub check_name: String,
+    pub passive: bool,
     pub output: String,
     pub status: CheckResultStatus,
     pub timestamp: Option<DateTime<Utc>>,
@@ -125,7 +128,7 @@ pub struct SimpleCheckResultDto {
 #[get("/checks")]
 pub async fn get_checks(
     _key: ApiKey,
-    checks: &State<SharedRunnableChecks>,
+    checks: &State<SharedPinglowChecks>,
 ) -> Json<Vec<SimpleCheckDto>> {
     let runnable_checks = checks.read().await;
 
@@ -148,7 +151,7 @@ pub async fn get_checks(
 #[get("/check-status/<target_check>")]
 pub async fn get_check_status(
     _key: ApiKey,
-    checks: &State<SharedRunnableChecks>,
+    checks: &State<SharedPinglowChecks>,
     client: &State<Arc<Client>>,
     target_check: &str,
 ) -> Option<Json<SimpleCheckResultDto>> {
@@ -158,10 +161,26 @@ pub async fn get_check_status(
         .iter()
         .find(|&check| check.0 == target_check)?;
 
-    let last_check_result = client.query_one("SELECT timestamp,status,output from check_result where check_name = $1 order by timestamp desc limit 1", &[&target_check]).await.ok()?;
+    let last_check_result_from_db = client.query_opt("SELECT timestamp,status,output from check_result where check_name = $1 order by timestamp desc limit 1", &[&target_check]).await.ok()?;
+
+    let last_check_result = if let Some(last_check_result) = last_check_result_from_db {
+        last_check_result
+    } else {
+        return Some(Json(SimpleCheckResultDto {
+            check_name: target_check.to_string(),
+            passive: check.passive,
+            output: "Check still needs to be executed".to_owned(),
+            status: crate::check::CheckResultStatus::Pending,
+            timestamp: None,
+            notifications_muted: check.mute_notifications,
+            notifications_muted_until: check.mute_notifications_until,
+        }));
+    };
+
     let check_status: i16 = last_check_result.get("status");
     Some(Json(SimpleCheckResultDto {
         check_name: target_check.to_string(),
+        passive: check.passive,
         output: last_check_result.get("output"),
         status: crate::check::CheckResultStatus::from(check_status),
         timestamp: last_check_result.get("timestamp"),
@@ -189,7 +208,7 @@ struct GroupedPerfData {
 #[get("/performance-data/<target_check>")]
 pub async fn get_performance_data(
     _key: ApiKey,
-    checks: &State<SharedRunnableChecks>,
+    checks: &State<SharedPinglowChecks>,
     client: &State<Arc<Client>>,
     target_check: &str,
 ) -> Option<Json<BTreeMap<DateTime<Utc>, HashMap<String, f32>>>> {
@@ -242,7 +261,7 @@ pub async fn get_performance_data(
 #[put("/check/<target_check>/mute?<until>")]
 pub async fn mute_check(
     _key: ApiKey,
-    checks: &State<SharedRunnableChecks>,
+    checks: &State<SharedPinglowChecks>,
     pinglow_config: &State<PinglowConfig>,
     target_check: &str,
     until: Option<String>,
@@ -340,7 +359,7 @@ pub async fn mute_check(
 #[delete("/check/<target_check>/mute")]
 pub async fn unmute_check(
     _key: ApiKey,
-    checks: &State<SharedRunnableChecks>,
+    checks: &State<SharedPinglowChecks>,
     pinglow_config: &State<PinglowConfig>,
     target_check: &str,
 ) -> Result<(), status::Custom<String>> {

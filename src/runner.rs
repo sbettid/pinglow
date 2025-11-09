@@ -18,7 +18,7 @@ use tokio::select;
 
 use tokio::{sync::mpsc, time::Instant};
 
-use crate::check::SharedRunnableChecks;
+use crate::check::SharedPinglowChecks;
 use crate::check::{self, PinglowCheck, ScheduledCheck};
 use crate::job::build_bash_job;
 use crate::job::build_python_job;
@@ -35,11 +35,16 @@ pub enum RunnableCheckEvent {
 async fn handle_check_event(
     event: RunnableCheckEvent,
     queue: &mut BTreeMap<Instant, ScheduledCheck>,
-    shared_checks: SharedRunnableChecks,
+    shared_checks: SharedPinglowChecks,
 ) {
     match event {
         RunnableCheckEvent::AddOrUpdate(check) => {
             let check_name = check.check_name.clone();
+
+            shared_checks
+                .write()
+                .await
+                .insert(check_name.clone(), check.clone());
 
             // Skip putting in queue passive checks
             if check.passive {
@@ -54,11 +59,6 @@ async fn handle_check_event(
             };
 
             let next_run = Instant::now() + Duration::from_secs(interval);
-
-            shared_checks
-                .write()
-                .await
-                .insert(check_name.clone(), check.clone());
 
             // Update the scheduled check
             queue.retain(|_i, scheduled_check| scheduled_check.check.check_name != check_name);
@@ -77,7 +77,7 @@ async fn handle_check_event(
 pub async fn scheduler_loop(
     mut event_rx: mpsc::Receiver<RunnableCheckEvent>,
     result_tx: mpsc::Sender<CheckResult>,
-    shared_checks: SharedRunnableChecks,
+    shared_checks: SharedPinglowChecks,
     namespace: String,
 ) {
     let mut queue: BTreeMap<Instant, ScheduledCheck> = BTreeMap::new();

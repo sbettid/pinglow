@@ -19,7 +19,7 @@ use kube::{Api, Client};
 use tokio_postgres::NoTls;
 
 use pinglow::api::start_rocket;
-use pinglow::check::{CheckResultStatus, SharedRunnableChecks};
+use pinglow::check::{CheckResultStatus, SharedPinglowChecks};
 use pinglow::controller::watch_resources;
 use pinglow::runner::RunnableCheckEvent;
 use pinglow::{
@@ -68,7 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client_arc = Arc::new(client);
 
     // Hashmap that holds the checks currently loaded
-    let shared_checks: SharedRunnableChecks = Arc::new(RwLock::new(HashMap::new()));
+    let shared_checks: SharedPinglowChecks = Arc::new(RwLock::new(HashMap::new()));
 
     let shared_original_checks: SharedChecks = Arc::new(DashMap::new());
 
@@ -115,7 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 result.write_to_db(client_arc.clone()).await?;
 
                 // Send result to telegram channels
-                if result.status != CheckResultStatus::Ok &&
+                if result.status != CheckResultStatus::Ok && result.status != CheckResultStatus::Pending &&
                 match result.mute_notifications {
                     Some(true) => {
                         match result.mute_notifications_until {

@@ -84,7 +84,7 @@ spec:
                   format: date-time
                   description: RFC 3339 timestamp indicating when to resume notifications.
               x-kubernetes-validations:
-                - rule: "(self.passive == false) || (has(self.scriptRef) && has(self.interval))"
+                - rule: "self.passive == true || (has(self.scriptRef) && has(self.interval))"
                   message: "An active check must have the scriptRef and interval defined."
 
 ---
