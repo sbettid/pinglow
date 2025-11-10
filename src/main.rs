@@ -1,13 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use chrono::{Local, Utc};
 use dashmap::DashMap;
 use env_logger::{self, Builder};
-use html_escape::encode_safe;
 use log::{error, info};
 use pinglow::check::{Check, CheckResult};
-use pinglow::load_single_runnable_check;
+use pinglow::{load_single_runnable_check, process_check_result};
 use tokio::signal::unix::signal;
 use tokio::sync::mpsc::Sender;
 use tokio::{
@@ -19,7 +17,7 @@ use kube::{Api, Client};
 use tokio_postgres::NoTls;
 
 use pinglow::api::start_rocket;
-use pinglow::check::{CheckResultStatus, SharedPinglowChecks};
+use pinglow::check::SharedPinglowChecks;
 use pinglow::controller::watch_resources;
 use pinglow::runner::RunnableCheckEvent;
 use pinglow::{
@@ -111,40 +109,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         tokio::select! {
             Some(result) = result_rx.recv() => {
-                // Write result to DB
-                result.write_to_db(client_arc.clone()).await?;
-
-                // Send result to telegram channels
-                if result.status != CheckResultStatus::Ok && result.status != CheckResultStatus::Pending &&
-                match result.mute_notifications {
-                    Some(true) => {
-                        match result.mute_notifications_until {
-                            Some(until) => until <= Utc::now(), // check if mute until is still valid
-                            None => false,                      // muted forever: don't send
-                        }
-                    }
-                    _ => true, // if mute_notifications is None or false we send the notification
-                }
-
-                {
-
-                    for channel in result.telegram_channels.iter() {
-                    let url = format!("https://api.telegram.org/bot{}/sendMessage", channel.bot_token);
-                    let timestamp_local = result.timestamp.unwrap().with_timezone(&Local);
-
-                    match  http_client.post(&url).form(&[
-                        ("chat_id", channel.chat_id.clone()),
-                        ("text", format!("<b>Date</b>: {0}\n<b>Check name</b>: {1} \n<b>Status</b>: {2:?}\n<b>Output</b>\n<pre>{3}</pre>", timestamp_local.format("%Y-%m-%d %H:%M:%S %Z"), result.check_name, result.status, encode_safe(&result.get_output()))),
-                        ("parse_mode", "HTML".to_string()),
-                    ]).send().await {
-                        Ok(_) => {},
-                        Err(e) => error!("Error when sending check result to Telegram channel: {e}"),
-                    }
-                }
-
-
-                }
-
+                // Process check result
+                process_check_result(result, &client_arc, &http_client).await?;
             }
             // In case we receive a sigterm we exit to teardown our jobs in a clean way (especially rocket)
             _ = sigint.recv() => {

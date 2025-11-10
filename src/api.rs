@@ -9,7 +9,7 @@ use log::warn;
 use rocket::{
     delete, get,
     http::Status,
-    put,
+    post, put,
     request::{FromRequest, Outcome},
     response::status,
     routes,
@@ -25,7 +25,9 @@ use utoipa::{
 };
 
 use crate::{
-    check::{Check, CheckResultStatus, PinglowCheck, ScriptLanguage, SharedPinglowChecks},
+    check::{
+        Check, CheckResult, CheckResultStatus, PinglowCheck, ScriptLanguage, SharedPinglowChecks,
+    },
     config::PinglowConfig,
     error,
 };
@@ -415,6 +417,70 @@ pub async fn unmute_check(
 
         runnable_checks.insert(target_check.to_string(), Arc::new(modified_check));
     }
+
+    Ok(())
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ProcessCheckResultPayload {
+    output: String,
+    status: i32,
+}
+
+#[utoipa::path(
+    post,
+    path = "/check/{target_check}/result",
+     params(
+        ("target_check" = String, Path, description = "The check for which we would like to send a result")
+    ),
+    responses(
+        (status = 200, description = "Whether the processing of the check result was successful")
+    )
+)]
+#[post("/check/<target_check>/result", data = "<check_result_payload>")]
+pub async fn process_check_result(
+    _key: ApiKey,
+    checks: &State<SharedPinglowChecks>,
+    client: &State<Arc<Client>>,
+    target_check: &str,
+    check_result_payload: Json<ProcessCheckResultPayload>,
+) -> Result<(), status::Custom<String>> {
+    // Read actual shared checks
+    let runnable_checks = checks.read().await;
+
+    // Ensure we can find the target check
+    let (_check_name, check) = runnable_checks
+        .iter()
+        .find(|&check| check.0 == target_check)
+        .ok_or(status::Custom(
+            Status::NotFound,
+            "Invalid target check".into(),
+        ))?;
+
+    // Extract the inner result object
+    let check_result_payload = check_result_payload.into_inner();
+
+    // Create the actual full check result
+    let check_result: CheckResult = CheckResult {
+        check_name: target_check.to_owned(),
+        output: check_result_payload.output,
+        status: check_result_payload.status.into(),
+        timestamp: Some(Utc::now()),
+        telegram_channels: check.telegram_channels.clone().into(),
+        mute_notifications: check.mute_notifications,
+        mute_notifications_until: check.mute_notifications_until,
+    };
+
+    let http_client = reqwest::Client::new();
+
+    crate::process_check_result(check_result, client, &http_client)
+        .await
+        .map_err(|err| {
+            status::Custom(
+                Status::InternalServerError,
+                format!("Error processing check result: {err}"),
+            )
+        })?;
 
     Ok(())
 }
