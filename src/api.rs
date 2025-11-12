@@ -52,7 +52,8 @@ pub async fn start_rocket(
                 get_check_status,
                 get_performance_data,
                 mute_check,
-                unmute_check
+                unmute_check,
+                process_check_result
             ],
         );
 
@@ -487,7 +488,7 @@ pub async fn process_check_result(
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(get_checks, get_check_status, get_performance_data, mute_check, unmute_check),
+    paths(get_checks, get_check_status, get_performance_data, mute_check, unmute_check, process_check_result),
     components(schemas(
         SimpleCheckDto,
         SimpleCheckResultDto,
