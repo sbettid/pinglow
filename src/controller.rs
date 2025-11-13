@@ -92,6 +92,7 @@ async fn reconcile(check: Arc<Check>, ctx: Arc<ContextData>) -> Result<Action, R
             .send(RunnableCheckEvent::Remove(check_name.to_string()))
             .await
             .map_err(|e| {
+                error!("Failed to send event for check {check_name}: {e:?}");
                 ReconcileError::SendError(format!("Error sending the check event {e:?}"))
             })?;
         return Ok(Action::await_change());
@@ -126,7 +127,12 @@ fn map_script_to_checks(
     let matching_checks: Vec<_> = shared_original_checks
         .iter()
         .filter_map(|entry| {
-            if *entry.spec.scriptRef == script_name {
+            if entry
+                .spec
+                .scriptRef
+                .as_ref()
+                .is_some_and(|s| *s == script_name)
+            {
                 Some(entry.value().clone())
             } else {
                 None

@@ -9,7 +9,7 @@ use log::warn;
 use rocket::{
     delete, get,
     http::Status,
-    put,
+    post, put,
     request::{FromRequest, Outcome},
     response::status,
     routes,
@@ -25,14 +25,16 @@ use utoipa::{
 };
 
 use crate::{
-    check::{Check, CheckResultStatus, RunnableCheck, ScriptLanguage, SharedRunnableChecks},
+    check::{
+        Check, CheckResult, CheckResultStatus, PinglowCheck, ScriptLanguage, SharedPinglowChecks,
+    },
     config::PinglowConfig,
     error,
 };
 
 pub async fn start_rocket(
     pinglow_config: PinglowConfig,
-    shared_checks: SharedRunnableChecks,
+    shared_checks: SharedPinglowChecks,
     client: Arc<tokio_postgres::Client>,
 ) -> Result<(Rocket<rocket::Ignite>, Shutdown), rocket::Error> {
     let figment = rocket::Config::figment()
@@ -50,7 +52,8 @@ pub async fn start_rocket(
                 get_check_status,
                 get_performance_data,
                 mute_check,
-                unmute_check
+                unmute_check,
+                process_check_result
             ],
         );
 
@@ -91,16 +94,18 @@ impl<'r> FromRequest<'r> for ApiKey {
 #[derive(Serialize, ToSchema, Debug)]
 pub struct SimpleCheckDto {
     pub check_name: String,
-    pub interval: u64,
-    pub language: ScriptLanguage,
+    pub passive: bool,
+    pub interval: Option<u64>,
+    pub language: Option<ScriptLanguage>,
 }
 
-impl From<&Arc<RunnableCheck>> for SimpleCheckDto {
-    fn from(value: &Arc<RunnableCheck>) -> Self {
+impl From<&Arc<PinglowCheck>> for SimpleCheckDto {
+    fn from(value: &Arc<PinglowCheck>) -> Self {
         Self {
             check_name: value.check_name.clone(),
+            passive: value.passive,
             interval: value.interval,
-            language: value.language.clone(),
+            language: value.as_ref().script.as_ref().map(|c| c.language.clone()),
         }
     }
 }
@@ -108,6 +113,7 @@ impl From<&Arc<RunnableCheck>> for SimpleCheckDto {
 #[derive(Serialize, ToSchema)]
 pub struct SimpleCheckResultDto {
     pub check_name: String,
+    pub passive: bool,
     pub output: String,
     pub status: CheckResultStatus,
     pub timestamp: Option<DateTime<Utc>>,
@@ -125,7 +131,7 @@ pub struct SimpleCheckResultDto {
 #[get("/checks")]
 pub async fn get_checks(
     _key: ApiKey,
-    checks: &State<SharedRunnableChecks>,
+    checks: &State<SharedPinglowChecks>,
 ) -> Json<Vec<SimpleCheckDto>> {
     let runnable_checks = checks.read().await;
 
@@ -148,7 +154,7 @@ pub async fn get_checks(
 #[get("/check-status/<target_check>")]
 pub async fn get_check_status(
     _key: ApiKey,
-    checks: &State<SharedRunnableChecks>,
+    checks: &State<SharedPinglowChecks>,
     client: &State<Arc<Client>>,
     target_check: &str,
 ) -> Option<Json<SimpleCheckResultDto>> {
@@ -158,10 +164,26 @@ pub async fn get_check_status(
         .iter()
         .find(|&check| check.0 == target_check)?;
 
-    let last_check_result = client.query_one("SELECT timestamp,status,output from check_result where check_name = $1 order by timestamp desc limit 1", &[&target_check]).await.ok()?;
+    let last_check_result_from_db = client.query_opt("SELECT timestamp,status,output from check_result where check_name = $1 order by timestamp desc limit 1", &[&target_check]).await.ok()?;
+
+    let last_check_result = if let Some(last_check_result) = last_check_result_from_db {
+        last_check_result
+    } else {
+        return Some(Json(SimpleCheckResultDto {
+            check_name: target_check.to_string(),
+            passive: check.passive,
+            output: "Check still needs to be executed".to_owned(),
+            status: crate::check::CheckResultStatus::Pending,
+            timestamp: None,
+            notifications_muted: check.mute_notifications,
+            notifications_muted_until: check.mute_notifications_until,
+        }));
+    };
+
     let check_status: i16 = last_check_result.get("status");
     Some(Json(SimpleCheckResultDto {
         check_name: target_check.to_string(),
+        passive: check.passive,
         output: last_check_result.get("output"),
         status: crate::check::CheckResultStatus::from(check_status),
         timestamp: last_check_result.get("timestamp"),
@@ -189,7 +211,7 @@ struct GroupedPerfData {
 #[get("/performance-data/<target_check>")]
 pub async fn get_performance_data(
     _key: ApiKey,
-    checks: &State<SharedRunnableChecks>,
+    checks: &State<SharedPinglowChecks>,
     client: &State<Arc<Client>>,
     target_check: &str,
 ) -> Option<Json<BTreeMap<DateTime<Utc>, HashMap<String, f32>>>> {
@@ -242,7 +264,7 @@ pub async fn get_performance_data(
 #[put("/check/<target_check>/mute?<until>")]
 pub async fn mute_check(
     _key: ApiKey,
-    checks: &State<SharedRunnableChecks>,
+    checks: &State<SharedPinglowChecks>,
     pinglow_config: &State<PinglowConfig>,
     target_check: &str,
     until: Option<String>,
@@ -340,7 +362,7 @@ pub async fn mute_check(
 #[delete("/check/<target_check>/mute")]
 pub async fn unmute_check(
     _key: ApiKey,
-    checks: &State<SharedRunnableChecks>,
+    checks: &State<SharedPinglowChecks>,
     pinglow_config: &State<PinglowConfig>,
     target_check: &str,
 ) -> Result<(), status::Custom<String>> {
@@ -400,9 +422,73 @@ pub async fn unmute_check(
     Ok(())
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ProcessCheckResultPayload {
+    output: String,
+    status: i32,
+}
+
+#[utoipa::path(
+    post,
+    path = "/check/{target_check}/result",
+     params(
+        ("target_check" = String, Path, description = "The check for which we would like to send a result")
+    ),
+    responses(
+        (status = 200, description = "Whether the processing of the check result was successful")
+    )
+)]
+#[post("/check/<target_check>/result", data = "<check_result_payload>")]
+pub async fn process_check_result(
+    _key: ApiKey,
+    checks: &State<SharedPinglowChecks>,
+    client: &State<Arc<Client>>,
+    target_check: &str,
+    check_result_payload: Json<ProcessCheckResultPayload>,
+) -> Result<(), status::Custom<String>> {
+    // Read actual shared checks
+    let runnable_checks = checks.read().await;
+
+    // Ensure we can find the target check
+    let (_check_name, check) = runnable_checks
+        .iter()
+        .find(|&check| check.0 == target_check)
+        .ok_or(status::Custom(
+            Status::NotFound,
+            "Invalid target check".into(),
+        ))?;
+
+    // Extract the inner result object
+    let check_result_payload = check_result_payload.into_inner();
+
+    // Create the actual full check result
+    let check_result: CheckResult = CheckResult {
+        check_name: target_check.to_owned(),
+        output: check_result_payload.output,
+        status: check_result_payload.status.into(),
+        timestamp: Some(Utc::now()),
+        telegram_channels: check.telegram_channels.clone().into(),
+        mute_notifications: check.mute_notifications,
+        mute_notifications_until: check.mute_notifications_until,
+    };
+
+    let http_client = reqwest::Client::new();
+
+    crate::process_check_result(check_result, client, &http_client)
+        .await
+        .map_err(|err| {
+            status::Custom(
+                Status::InternalServerError,
+                format!("Error processing check result: {err}"),
+            )
+        })?;
+
+    Ok(())
+}
+
 #[derive(OpenApi)]
 #[openapi(
-    paths(get_checks, get_check_status, get_performance_data, mute_check, unmute_check),
+    paths(get_checks, get_check_status, get_performance_data, mute_check, unmute_check, process_check_result),
     components(schemas(
         SimpleCheckDto,
         SimpleCheckResultDto,

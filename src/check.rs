@@ -11,7 +11,7 @@ use tokio_postgres::Client;
 use dashmap::DashMap;
 use utoipa::ToSchema;
 
-pub type SharedRunnableChecks = Arc<RwLock<HashMap<String, Arc<RunnableCheck>>>>;
+pub type SharedPinglowChecks = Arc<RwLock<HashMap<String, Arc<PinglowCheck>>>>;
 pub type SharedChecks = Arc<DashMap<String, Arc<Check>>>;
 
 #[derive(Debug, Serialize, PartialEq, ToSchema)]
@@ -20,6 +20,7 @@ pub enum CheckResultStatus {
     Warning,
     Critical,
     CheckError,
+    Pending,
 }
 
 impl From<i32> for CheckResultStatus {
@@ -28,6 +29,7 @@ impl From<i32> for CheckResultStatus {
             0 => CheckResultStatus::Ok,
             1 => CheckResultStatus::Warning,
             2 => CheckResultStatus::Critical,
+            4 => CheckResultStatus::Pending,
             _ => CheckResultStatus::CheckError,
         }
     }
@@ -39,6 +41,7 @@ impl From<i16> for CheckResultStatus {
             0 => CheckResultStatus::Ok,
             1 => CheckResultStatus::Warning,
             2 => CheckResultStatus::Critical,
+            4 => CheckResultStatus::Pending,
             _ => CheckResultStatus::CheckError,
         }
     }
@@ -51,6 +54,7 @@ impl CheckResultStatus {
             CheckResultStatus::Warning => 1,
             CheckResultStatus::Critical => 2,
             CheckResultStatus::CheckError => 3,
+            CheckResultStatus::Pending => 4,
         }
     }
 }
@@ -202,12 +206,13 @@ pub struct ConcreteTelegramChannel {
 #[kube(group = "pinglow.io", version = "v1alpha1", kind = "Check", namespaced)]
 #[allow(non_snake_case)]
 pub struct CheckSpec {
-    pub scriptRef: String,
-    pub interval: u64,
+    pub scriptRef: Option<String>,
+    pub interval: Option<u64>,
     pub secretRefs: Option<Vec<String>>,
     pub telegramChannelRefs: Option<Vec<String>>,
     pub muteNotifications: Option<bool>,
     pub muteNotificationsUntil: Option<DateTime<Utc>>,
+    pub passive: bool,
 }
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
@@ -224,13 +229,12 @@ pub struct ScriptSpec {
 }
 
 #[derive(Clone, Debug)]
-pub struct RunnableCheck {
-    pub script: String,
-    pub interval: u64,
-    pub language: ScriptLanguage,
+pub struct PinglowCheck {
+    pub passive: bool,
+    pub script: Option<ScriptSpec>,
+    pub interval: Option<u64>,
     pub check_name: String,
     pub secrets_refs: Option<Vec<String>>,
-    pub python_requirements: Option<Vec<String>>,
     pub telegram_channels: Vec<ConcreteTelegramChannel>,
     pub mute_notifications: Option<bool>,
     pub mute_notifications_until: Option<DateTime<Utc>>,
@@ -238,7 +242,7 @@ pub struct RunnableCheck {
 
 #[derive(Clone, Debug)]
 pub struct ScheduledCheck {
-    pub check: Arc<RunnableCheck>,
+    pub check: Arc<PinglowCheck>,
     pub next_run: Instant,
 }
 
