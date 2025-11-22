@@ -20,7 +20,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Install Rust with target
         uses: dtolnay/rust-toolchain@stable
@@ -54,7 +54,7 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Download binaries
         uses: actions/download-artifact@v6
@@ -93,7 +93,7 @@ jobs:
    
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Python
         uses: actions/setup-python@v6
