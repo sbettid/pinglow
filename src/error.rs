@@ -12,11 +12,17 @@ pub enum ReconcileError {
     #[error("PropertyExtractionError '{0}' not found")]
     PropertyExtractionError(String),
 
-    #[error("GeneralError fetch error: {0}")]
-    GeneralError(#[from] kube::Error),
+    #[error("GeneralError error: {0}")]
+    GeneralError(String),
 
     #[error("Cannot send message in channel: {0}")]
     SendError(String),
+}
+
+impl From<kube::Error> for ReconcileError {
+    fn from(value: kube::Error) -> Self {
+        ReconcileError::GeneralError(format!("Error: {value}"))
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
