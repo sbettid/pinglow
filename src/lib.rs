@@ -133,7 +133,10 @@ pub async fn process_check_result(
                 "https://api.telegram.org/bot{}/sendMessage",
                 channel.bot_token
             );
-            let timestamp_local = result.timestamp.unwrap().with_timezone(&Local);
+            let timestamp_local = result
+                .timestamp
+                .unwrap_or_else(Utc::now)
+                .with_timezone(&Local);
 
             match  http_client.post(&url).form(&[
                         ("chat_id", channel.chat_id.clone()),

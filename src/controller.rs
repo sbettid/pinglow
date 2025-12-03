@@ -9,14 +9,24 @@ use crate::{
 };
 use futures::StreamExt;
 use k8s_openapi::api::core::v1::Secret;
-use kube::runtime::{controller::Action, reflector::ObjectRef};
+use kube::{
+    runtime::{
+        controller::Action,
+        finalizer::{finalizer, Error as FinalizerError, Event},
+        reflector::ObjectRef,
+    },
+    ResourceExt,
+};
 use kube::{
     runtime::{watcher, Controller},
     Api, Client,
 };
-use log::{debug, error};
+use log::{debug, error, info};
 use std::time::Duration;
 use tokio::sync::mpsc::Sender;
+
+// Finalizer string
+const FINALIZER_NAME: &str = "checks.pinglow.io/finalizer";
 
 #[derive(Clone)]
 struct ContextData {
@@ -86,27 +96,57 @@ async fn reconcile(check: Arc<Check>, ctx: Arc<ContextData>) -> Result<Action, R
                 "Error in extracting the name for {check:?}",
             )))?;
 
-    if check.metadata.deletion_timestamp.is_some() {
-        ctx.shared_checks.remove(check_name);
-        ctx.event_rx
-            .send(RunnableCheckEvent::Remove(check_name.to_string()))
-            .await
-            .map_err(|e| {
-                error!("Failed to send event for check {check_name}: {e:?}");
-                ReconcileError::SendError(format!("Error sending the check event {e:?}"))
-            })?;
-        return Ok(Action::await_change());
-    }
+    let namespace = check
+        .namespace()
+        .unwrap_or(ctx.config.target_namespace.to_string());
+    let client = ctx.client.clone();
+    let api: Api<Check> = Api::namespaced(client, &namespace);
 
-    let runnable_check = load_single_runnable_check(&check, &ctx.client, &ctx.config).await?;
+    finalizer(
+        &api,
+        FINALIZER_NAME,
+        check.clone(),
+        |event: Event<Check>| async {
+            let check = check.clone();
+            match event {
+                Event::Apply(c) => {
+                    // Normal reconcile logic
+                    info!("Reconciling Check: {}", c.name_any());
 
-    ctx.shared_checks.insert(check_name.clone(), check);
+                    let runnable_check =
+                        load_single_runnable_check(&check, &ctx.client, &ctx.config).await?;
 
-    ctx.event_rx
-        .send(RunnableCheckEvent::AddOrUpdate(Arc::new(runnable_check)))
-        .await
-        .ok();
-    Ok(Action::await_change())
+                    ctx.shared_checks.insert(check_name.clone(), check);
+
+                    ctx.event_rx
+                        .send(RunnableCheckEvent::AddOrUpdate(Arc::new(runnable_check)))
+                        .await
+                        .map_err(|e| {
+                            ReconcileError::SendError(format!("Error sending event: {e}"))
+                        })?;
+                    Ok(Action::await_change())
+                }
+                Event::Cleanup(c) => {
+                    // Called when the object is being deleted
+                    info!("Cleanup for deleted Check: {}", c.name_any());
+
+                    ctx.shared_checks.remove(check_name);
+                    ctx.event_rx
+                        .send(RunnableCheckEvent::Remove(check_name.to_string()))
+                        .await
+                        .map_err(|e| {
+                            error!("Failed to send event for check {check_name}: {e:?}");
+                            ReconcileError::SendError(format!("Error sending event: {e}"))
+                        })?;
+
+                    // Once this function returns Ok, the finalizer is removed automatically
+                    Ok(Action::await_change()) // stop reconciling
+                }
+            }
+        },
+    )
+    .await
+    .map_err(|e: FinalizerError<ReconcileError>| ReconcileError::GeneralError(format!("{e}")))
 }
 /// an error handler that will be called when the reconciler fails with access to both the
 /// object that caused the failure and the actual error

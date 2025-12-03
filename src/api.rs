@@ -513,16 +513,13 @@ struct SecurityAddon;
 
 impl Modify for SecurityAddon {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
-        openapi
-            .components
-            .as_mut()
-            .unwrap()
-            .security_schemes
-            .insert(
+        if let Some(components) = openapi.components.as_mut() {
+            components.security_schemes.insert(
                 "api_key".to_string(),
                 SecurityScheme::ApiKey(utoipa::openapi::security::ApiKey::Header(
                     ApiKeyValue::new("x-api-key"),
                 )),
             );
+        }
     }
 }
