@@ -8,6 +8,7 @@ pub struct PinglowConfig {
     pub db_user: String,
     pub db_user_password: String,
     pub api_key: String,
+    pub redis_password: String,
 }
 
 /**
@@ -22,5 +23,6 @@ pub fn get_config_from_env() -> PinglowConfig {
         db_user: env::var("DB_USER").expect("The variable DB_USER must be set"),
         db_user_password: env::var("DB_USER_PASSWORD")
             .expect("The variable DB_USER_PASSWORD must be set"),
+        redis_password: env::var("REDIS_PASSWORD").expect("Redis password must be set"),
     }
 }

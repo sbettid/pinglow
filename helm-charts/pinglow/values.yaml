@@ -4,3 +4,12 @@
 
 DBEnvFromSecret: "pinglow-db-env"
 ApiKeyEnvFromSecret: "pinglow-api-key"
+
+redis:
+  architecture: standalone
+  auth:
+    existingSecret: pinglow-redis-password
+    passwordKey: password 
+  master:
+    persistence:
+      enabled: false

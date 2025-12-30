@@ -9,12 +9,13 @@ use log::error;
 use tokio_postgres::Client as PostgresClient;
 
 use crate::{
-    check::{
-        Check, CheckResult, CheckResultStatus, ConcreteTelegramChannel, PinglowCheck, Script,
-        TelegramChannel,
-    },
+    check::{Check, TelegramChannel},
     config::PinglowConfig,
     error::ReconcileError,
+};
+
+use pinglow_common::{
+    CheckResult, CheckResultStatus, ConcreteTelegramChannel, PinglowCheck, Script,
 };
 
 pub mod api;
@@ -23,7 +24,9 @@ pub mod config;
 pub mod controller;
 pub mod error;
 pub mod job;
-pub mod runner;
+pub mod redis;
+pub mod results;
+pub mod scheduler;
 
 pub async fn load_single_runnable_check(
     check: &Check,

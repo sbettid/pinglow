@@ -3,9 +3,14 @@ use std::{
     sync::Arc,
 };
 
+use crate::{
+    check::{Check, SharedPinglowChecks},
+    config::PinglowConfig,
+};
 use chrono::{DateTime, FixedOffset, Utc};
 use kube::Api;
 use log::warn;
+use pinglow_common::{CheckResult, CheckResultStatus, PinglowCheck, ScriptLanguage};
 use rocket::{
     delete, get,
     http::Status,
@@ -22,14 +27,6 @@ use tokio_postgres::Client;
 use utoipa::{
     openapi::security::{ApiKeyValue, SecurityScheme},
     Modify, OpenApi, ToSchema,
-};
-
-use crate::{
-    check::{
-        Check, CheckResult, CheckResultStatus, PinglowCheck, ScriptLanguage, SharedPinglowChecks,
-    },
-    config::PinglowConfig,
-    error,
 };
 
 pub async fn start_rocket(
@@ -96,7 +93,7 @@ pub struct SimpleCheckDto {
     pub check_name: String,
     pub passive: bool,
     pub interval: Option<u64>,
-    pub language: Option<ScriptLanguage>,
+    //pub language: Option<ScriptLanguage>,
 }
 
 impl From<&Arc<PinglowCheck>> for SimpleCheckDto {
@@ -105,7 +102,7 @@ impl From<&Arc<PinglowCheck>> for SimpleCheckDto {
             check_name: value.check_name.clone(),
             passive: value.passive,
             interval: value.interval,
-            language: value.as_ref().script.as_ref().map(|c| c.language.clone()),
+            //language: value.as_ref().script.as_ref().map(|c| c.language.clone()),
         }
     }
 }
@@ -173,7 +170,7 @@ pub async fn get_check_status(
             check_name: target_check.to_string(),
             passive: check.passive,
             output: "Check still needs to be executed".to_owned(),
-            status: crate::check::CheckResultStatus::Pending,
+            status: CheckResultStatus::Pending,
             timestamp: None,
             notifications_muted: check.mute_notifications,
             notifications_muted_until: check.mute_notifications_until,
@@ -185,7 +182,7 @@ pub async fn get_check_status(
         check_name: target_check.to_string(),
         passive: check.passive,
         output: last_check_result.get("output"),
-        status: crate::check::CheckResultStatus::from(check_status),
+        status: CheckResultStatus::from(check_status),
         timestamp: last_check_result.get("timestamp"),
         notifications_muted: check.mute_notifications,
         notifications_muted_until: check.mute_notifications_until,
@@ -233,7 +230,7 @@ pub async fn get_performance_data(
         let perf_data_map: HashMap<String, f32> = serde_json::from_value(perf_data_json)
             .map_err(|e| {
                 warn!("Failed to parse JSON perf_data: {e}");
-                error::TimescaleDBConversionError::DeserializationError(e.to_string())
+                pinglow_common::error::SerializeError::DeserializationError(e.to_string())
             })
             .ok()?;
 

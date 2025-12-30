@@ -1,0 +1,53 @@
+[package]
+name = "pinglow"
+
+# Inherit from workspace
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+default-run = "pinglow"
+
+[features]
+openapi-docs = []
+
+[[bin]]
+name = "pinglow"
+path = "src/main.rs"
+
+
+[[bin]]
+name = "generate-openapi"
+path = "bin/generate-openapi.rs"
+required-features = ["openapi-docs"]
+
+
+[dependencies]
+pinglow-common = { path = "../common" }
+
+utoipa.workspace = true
+schemars.workspace = true
+serde.workspace = true
+chrono.workspace = true
+tokio-postgres.workspace = true
+log.workspace = true
+anyhow.workspace = true
+kube.workspace = true
+serde_json.workspace = true
+k8s-openapi.workspace = true
+tokio.workspace = true
+redis.workspace = true
+thiserror.workspace = true
+env_logger.workspace = true
+
+futures = "0.3"
+refinery = {version = "0.9", features = ["tokio-postgres"]}
+rocket = { version = "0.5", features = ["json"] }
+reqwest = "0.12"
+openssl = { version = "0.10", features = ["vendored"] }
+dashmap = "6.1.0"
+html-escape = "0.2"
+
+[dev-dependencies]
+rustfmt = "0.10.0"

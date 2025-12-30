@@ -1,0 +1,25 @@
+[package]
+name = "pinglow-common"
+
+# Inherit from workspace
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+utoipa.workspace = true
+serde.workspace = true
+schemars.workspace = true
+chrono.workspace = true
+tokio-postgres.workspace = true
+log.workspace = true
+kube.workspace = true
+serde_json.workspace = true
+k8s-openapi.workspace = true
+tokio.workspace = true
+thiserror.workspace = true
+redis.workspace = true

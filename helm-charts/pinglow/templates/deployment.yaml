@@ -16,13 +16,57 @@ spec:
       containers:
         - name: {{ .Release.Name }}
           image: "ghcr.io/sbettid/{{ .Release.Name }}:{{ .Chart.AppVersion }}"
-
           envFrom:
             - secretRef:
                 name: {{ .Values.ApiKeyEnvFromSecret }}
             - secretRef:
                 name: {{ .Values.DBEnvFromSecret }}
+            - secretRef:
+                name: pinglow-redis-password
+          env: 
+             - name: REDIS_HOST
+               value: "{{ .Release.Name }}-redis.pinglow.svc.cluster.local"
           ports:
             - containerPort: 8000
       imagePullSecrets:
         - name: pinglow-pull
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-runner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-runner
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-runner
+    spec:
+      serviceAccountName: {{ .Release.Name }}
+      containers:
+        - name: {{ .Release.Name }}-runner
+          image: "ghcr.io/sbettid/{{ .Release.Name }}-runner:{{ .Chart.AppVersion }}"
+          securityContext:
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: runner-writable
+              mountPath: /home/pinglow-runner
+              readOnly: false
+          envFrom:
+            - secretRef:
+                name: pinglow-redis-password
+          env: 
+            - name: REDIS_HOST
+              value: "{{ .Release.Name }}-redis.pinglow.svc.cluster.local"
+            - name: RUNNER_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+      imagePullSecrets:
+        - name: pinglow-pull
+      volumes:
+        - name: runner-writable
+          emptyDir: {}

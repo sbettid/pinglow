@@ -1,0 +1,27 @@
+[package]
+name = "pinglow-runner"
+
+# Inherit from workspace
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "pinglow-runner"
+path = "src/main.rs"
+
+[dependencies]
+pinglow-common = { path = "../common" }
+anyhow.workspace = true
+redis.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+tokio.workspace = true
+log.workspace = true
+env_logger.workspace = true
+chrono.workspace = true
+kube.workspace = true
+k8s-openapi.workspace = true
+
+base64 = "0.22"
