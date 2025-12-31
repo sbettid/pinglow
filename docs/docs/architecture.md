@@ -15,4 +15,4 @@ Pinglow follows a controller-workers architecture, with the following roles:
 
 Below a diagram depicts the overall architecture: 
 
-![Pinglow Architecture](img/pinglow_architecture.svg)
+![Pinglow Architecture](/img/pinglow_architecture.svg)
