@@ -37,7 +37,8 @@ jobs:
 
       - name: Rename binary for Docker build
         run: |
-          mkdir -p ./bin//${{ matrix.binary }}/${{ matrix.target }}
+          mkdir -p ./bin/pinglow/${{ matrix.target }}
+          mkdir -p ./bin/pinglow-runner/${{ matrix.target }}
           cp target/${{ matrix.target }}/release/pinglow ./bin/pinglow/${{ matrix.target }}/
           cp target/${{ matrix.target }}/release/pinglow-runner ./bin/pinglow-runner/${{ matrix.target }}/
 
