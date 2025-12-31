@@ -22,10 +22,10 @@ spec:
             - secretRef:
                 name: {{ .Values.DBEnvFromSecret }}
             - secretRef:
-                name: pinglow-redis-password
+                name: {{ .Values.RedisPasswordSecret }}
           env: 
              - name: REDIS_HOST
-               value: "{{ .Release.Name }}-redis.pinglow.svc.cluster.local"
+               value: "redis"
           ports:
             - containerPort: 8000
       imagePullSecrets:
@@ -57,10 +57,10 @@ spec:
               readOnly: false
           envFrom:
             - secretRef:
-                name: pinglow-redis-password
+                name: {{ .Values.RedisPasswordSecret }}
           env: 
             - name: REDIS_HOST
-              value: "{{ .Release.Name }}-redis.pinglow.svc.cluster.local"
+              value: "redis"
             - name: RUNNER_NAME
               valueFrom:
                 fieldRef:
@@ -70,3 +70,46 @@ spec:
       volumes:
         - name: runner-writable
           emptyDir: {}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+spec:
+  serviceName: redis
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:8-alpine
+          args:
+            - "--requirepass"
+            - "$(REDIS_PASSWORD)"
+            - "--appendonly"
+            - "yes"
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.RedisPasswordSecret }}
+                  key: REDIS_PASSWORD
+          ports:
+            - containerPort: 6379
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

@@ -1,15 +1,7 @@
 # Default values for pinglow.
-# This is a YAML-formatted file.
-# Declare variables to be passed into your templates.
 
 DBEnvFromSecret: "pinglow-db-env"
+
 ApiKeyEnvFromSecret: "pinglow-api-key"
 
-redis:
-  architecture: standalone
-  auth:
-    existingSecret: pinglow-redis-password
-    passwordKey: password 
-  master:
-    persistence:
-      enabled: false
+RedisPasswordSecret: "pinglow-redis-password"
