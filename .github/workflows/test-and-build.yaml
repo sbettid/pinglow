@@ -94,13 +94,6 @@ jobs:
         id: extract_tag
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
 
-      - name: Debug binary layout
-        run: |
-          echo "==== BIN TREE ===="
-          find ./bin -type d
-          echo "==== BIN FILES ===="
-          find ./bin -type f
-
       - name: Build and Push Multi-Arch Image
         run: |
           docker buildx build \
@@ -108,7 +101,7 @@ jobs:
             --build-arg BINARY_NAME=${{ env.BINARY_NAME }}-runner \
             --build-context bin_amd64=./bin/bin-pinglow-runner/x86_64-unknown-linux-musl \
             --build-context bin_arm64=./bin/bin-pinglow-runner/aarch64-unknown-linux-musl \
-            -t ghcr.io/${{ github.repository }}/pinglow-runner:${{ env.VERSION }} \
+            -t ghcr.io/${{ github.repository }}-runner:${{ env.VERSION }} \
             --push \
             -f ./src/pinglow-runner/Dockerfile.multiarch .
 
@@ -159,7 +152,7 @@ jobs:
             --build-arg BINARY_NAME=${{ env.BINARY_NAME }} \
             --build-context bin_amd64=./bin/bin-pinglow/x86_64-unknown-linux-musl \
             --build-context bin_arm64=./bin/bin-pinglow/aarch64-unknown-linux-musl \
-            -t ghcr.io/${{ github.repository }}/pinglow:${{ env.VERSION }} \
+            -t ghcr.io/${{ github.repository }}:${{ env.VERSION }} \
             --push \
             -f ./src/pinglow/Dockerfile.multiarch .
 
