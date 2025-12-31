@@ -43,12 +43,12 @@ jobs:
           cp target/${{ matrix.target }}/release/pinglow-runner ./bin/pinglow-runner/${{ matrix.target }}/
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: bin-pinglow-${{ matrix.target }}
           path: ./bin/pinglow/${{ matrix.target }}
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v6
         with:
           name: bin-pinglow-runner-${{ matrix.target }}
           path: ./bin/pinglow-runner/${{ matrix.target }}
