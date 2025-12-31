@@ -7,7 +7,7 @@ const sidebars: SidebarsConfig = {
 
   documentationSidebar: [
     'documentation',
-    'architecture'
+    'architecture',
     {
       type: 'category',
       label: 'Deployment',
