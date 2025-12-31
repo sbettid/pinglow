@@ -3,7 +3,7 @@ version: "3.9"
 services:
 
   redis:
-    image: redis:7
+    image: redis:8
     command: sh -c 'redis-server --requirepass "$REDIS_PASSWORD"'
     environment:
       REDIS_PASSWORD: pinglow
