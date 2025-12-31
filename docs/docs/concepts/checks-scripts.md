@@ -4,7 +4,7 @@ sidebar_position: 1
 
 # Checks and scripts
 
-The basic idea is that monitoring is performed through `Checks` which execute a specific `Script` (Bash and Python are supported for now) as a Kubernetes job. 
+The basic idea is that monitoring is performed through `Checks` which execute a specific `Script` (only Python is supported for now) as a Kubernetes job. 
 
 `Check` statuses are defined by the following elements: 
 
@@ -38,20 +38,49 @@ As we can see, the `Check` references a standard secret and so its keys and valu
 apiVersion: pinglow.io/v1alpha1
 kind: Script
 metadata:
-  name: my-service-definition
+  name: check-service
   namespace: pinglow
 spec:
-  language: Bash
+  language: Python
+  python_requirements:
+    - requests
   content: |
-    if ! curl -u "${USER}:${PASSWORD}" "https://${ENDPOINT}"" ; then
-        echo "[!] Error in reaching ${ENDPOINT}"
-        exit 2
-    fi
+    import requests
+    import os
+    import sys
 
-    exit 0
+    url = os.environ.get("URL")
+
+    response = requests.get(url, timeout=5)
+
+    if response.status_code != 200:
+      print("Error in contacting endpoint")
+      sys.exit(2)
 ```
 
-In case the script would have been a Python script, an additional `python_requirements` property is available to specify requirements which need to be installed to run the script.
+## Performance data
+
+When writing a script, it is possible to print not only the general output, but also some performance data that will be stripped out from the output
+and wrote separately in a dedicated table in TimescalDB (and returned also separately by the API).
+
+To specify both an output and some performance data, it is possible to use the following format: `output|key=value,key2=value`. 
+
+For example, a script which may read some temperature and humidity data may be partially similar to what depicted below: 
+
+```yaml
+apiVersion: pinglow.io/v1alpha1
+kind: Script
+metadata:
+  name: script-temperature-humidity
+  namespace: pinglow
+spec:
+  language: Python
+  content: |
+    temperature = getTemperature()
+    humidity = getHumidity()
+
+    print(f"Your temperature and humidity are OK!|temperature={temperature},humidity={humidity}")
+```
 
 # Passive checks
 
