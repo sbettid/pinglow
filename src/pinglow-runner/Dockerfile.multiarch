@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1.20
+FROM --platform=$BUILDPLATFORM debian:bullseye-slim
+
+ARG TARGETARCH
+ARG BINARY_NAME
+
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN addgroup --system pinglow-runner && \
+    adduser --system --ingroup pinglow-runner --home /home/pinglow-runner pinglow-runner
+
+COPY --from=bin_amd64 ${BINARY_NAME} /usr/local/bin/pinglow
+COPY --from=bin_arm64 ${BINARY_NAME} /usr/local/bin/pinglow
+
+RUN chown pinglow-runner:pinglow-runner /usr/local/bin/pinglow-runner && chmod 755 /usr/local/bin/pinglow-runner
+
+USER pinglow-runner
+WORKDIR /home/pinglow-runner
+
+CMD ["/usr/local/bin/pinglow-runner"]

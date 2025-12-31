@@ -26,10 +26,10 @@ impl From<kube::Error> for ReconcileError {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum TimescaleDBConversionError {
-    #[error("Cannot deserialize result: {0}")]
-    DeserializationError(String),
-}
+pub enum ChannelError {}
 
 #[derive(thiserror::Error, Debug)]
-pub enum ChannelError {}
+pub enum RedisError {
+    #[error("Error when building redis client: {0}")]
+    ClientBuildError(String),
+}

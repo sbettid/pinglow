@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+
+  redis:
+    image: redis:7
+    command: sh -c 'redis-server --requirepass "$REDIS_PASSWORD"'
+    environment:
+      REDIS_PASSWORD: pinglow
+    ports:
+      - "6379:6379"
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg17
+    environment:
+      POSTGRES_DB: pinglow
+      POSTGRES_USER: pinglow
+      POSTGRES_PASSWORD: pinglow
+      REDIS_PASSWORD: pinglow
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+volumes:
+  timescale-data:
+ 

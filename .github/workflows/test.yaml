@@ -30,7 +30,7 @@ jobs:
           python-version: '3.x'
 
       - name: Generate openapi specification
-        run: cargo run --bin generate-openapi
+        run: cargo run -p pinglow --bin generate-openapi --features openapi-docs
 
       - name: Install dependencies
         working-directory: docs

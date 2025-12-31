@@ -1,20 +1,17 @@
-use std::{cmp::Ordering, collections::HashMap, fmt::Display, sync::Arc};
-
 use chrono::{DateTime, Utc};
 use kube::CustomResource;
 use log::warn;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use tokio::{sync::RwLock, time::Instant};
+use std::{cmp::Ordering, fmt::Display, sync::Arc};
+use tokio::time::Instant;
 use tokio_postgres::Client;
-
-use dashmap::DashMap;
 use utoipa::ToSchema;
 
-pub type SharedPinglowChecks = Arc<RwLock<HashMap<String, Arc<PinglowCheck>>>>;
-pub type SharedChecks = Arc<DashMap<String, Arc<Check>>>;
+pub mod error;
+pub mod redis;
 
-#[derive(Debug, Serialize, PartialEq, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 pub enum CheckResultStatus {
     Ok,
     Warning,
@@ -59,7 +56,7 @@ impl CheckResultStatus {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, ToSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, ToSchema, PartialEq)]
 pub enum ScriptLanguage {
     #[serde(rename = "Python")]
     Python,
@@ -76,12 +73,19 @@ impl Display for ScriptLanguage {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConcreteTelegramChannel {
+    pub chat_id: String,
+    pub bot_token: String, // The name of the secret
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CheckResult {
     pub check_name: String,
     pub output: String,
     pub status: CheckResultStatus,
     pub timestamp: Option<DateTime<Utc>>,
-    pub telegram_channels: Arc<[ConcreteTelegramChannel]>,
+    pub telegram_channels: Arc<Vec<ConcreteTelegramChannel>>,
     pub mute_notifications: Option<bool>,
     pub mute_notifications_until: Option<DateTime<Utc>>,
 }
@@ -102,7 +106,7 @@ impl CheckResult {
             output: error_message,
             status: CheckResultStatus::CheckError,
             timestamp: None,
-            telegram_channels: Arc::from(&[][..]),
+            telegram_channels: Arc::from(vec![]),
             mute_notifications,
             mute_notifications_until,
         }
@@ -176,45 +180,6 @@ impl CheckResult {
     }
 }
 
-pub fn map_command_exit_code_to_check_result(exit_code: Option<i32>) -> CheckResultStatus {
-    if let Some(exit_code) = exit_code {
-        return CheckResultStatus::from(exit_code);
-    }
-    CheckResultStatus::CheckError
-}
-
-#[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
-#[kube(
-    group = "pinglow.io",
-    version = "v1alpha1",
-    kind = "TelegramChannel",
-    namespaced
-)]
-#[allow(non_snake_case)]
-pub struct TelegramChannelSpec {
-    pub chatId: String,
-    pub botTokenRef: String, // The name of the secret
-}
-
-#[derive(Debug, Clone)]
-pub struct ConcreteTelegramChannel {
-    pub chat_id: String,
-    pub bot_token: String, // The name of the secret
-}
-
-#[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
-#[kube(group = "pinglow.io", version = "v1alpha1", kind = "Check", namespaced)]
-#[allow(non_snake_case)]
-pub struct CheckSpec {
-    pub scriptRef: Option<String>,
-    pub interval: Option<u64>,
-    pub secretRefs: Option<Vec<String>>,
-    pub telegramChannelRefs: Option<Vec<String>>,
-    pub muteNotifications: Option<bool>,
-    pub muteNotificationsUntil: Option<DateTime<Utc>>,
-    pub passive: bool,
-}
-
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
 #[kube(
     group = "pinglow.io",
@@ -223,12 +188,12 @@ pub struct CheckSpec {
     namespaced
 )]
 pub struct ScriptSpec {
-    pub language: ScriptLanguage,
+    //pub language: ScriptLanguage,
     pub content: String,
     pub python_requirements: Option<Vec<String>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PinglowCheck {
     pub passive: bool,
     pub script: Option<ScriptSpec>,
@@ -246,7 +211,6 @@ pub struct ScheduledCheck {
     pub next_run: Instant,
 }
 
-// Min-heap (invert the comparison)
 impl PartialEq for ScheduledCheck {
     fn eq(&self, other: &Self) -> bool {
         self.next_run == other.next_run
@@ -256,11 +220,11 @@ impl Eq for ScheduledCheck {}
 
 impl PartialOrd for ScheduledCheck {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(other.next_run.cmp(&self.next_run)) // reverse
+        Some(self.cmp(other))
     }
 }
 impl Ord for ScheduledCheck {
     fn cmp(&self, other: &Self) -> Ordering {
-        other.next_run.cmp(&self.next_run) // reverse
+        other.next_run.cmp(&self.next_run)
     }
 }
