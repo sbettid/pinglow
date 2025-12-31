@@ -13,10 +13,12 @@ To deploy Pinglow, you can follow these steps:
     
 - Adapt the `values.yaml` file to specify the references to the two secrets needed for the deployment
      
-    - `DBEnvFromSecret`: which should specify the following properties
+    - `DBEnvFromSecret`: which should specify the name of a secret holding the following properties
 
         - `DB_HOST`: hostname of you timescaledb instance
         - `DB_USER`: username of an user in timescaledb with the privileged to manage a dedicated DB (by default named `pinglow`)
         - `DB_USER_PASSWORD`: password of the aforementioned user
 
-    - `ApiKeyEnvFromSecret`: which specifies a single property named `API_KEY` which represents the API key used to authenticate to the RestAPI offered by Pinglow.
+    - `ApiKeyEnvFromSecret`: which specifies the name of a secret holding a single property named `API_KEY` which represents the API key used to authenticate to the RestAPI offered by Pinglow.
+
+    - `RedisPasswordSecret`: which specifies the name of a secret holding a single property named `REDIS_PASSWORD` which represents the password using to authenticate to Redis.
