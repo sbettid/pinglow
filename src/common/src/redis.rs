@@ -1,12 +1,10 @@
 use std::collections::HashMap;
 
-use log::info;
 use redis::{Client as RedisClient, RedisError, Value};
 
 pub fn redis_client() -> Result<RedisClient, RedisError> {
     let host = std::env::var("REDIS_HOST").expect("REDIS_HOST must be set");
     let password = std::env::var("REDIS_PASSWORD").expect("REDIS_PASSWORD must be set");
-    info!("Creating redis client redis://:{password}@{host}:6379");
     RedisClient::open(format!("redis://:{password}@{host}:6379"))
 }
 
