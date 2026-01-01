@@ -127,7 +127,6 @@ async fn fetch_secrets(
 
     for secret_name in secret_names {
         if let Ok(secret) = secrets_api.get(secret_name).await {
-            info!("Raw secret from API {secret:?}");
             if let Some(data) = secret.data {
                 for (key, value) in data {
                     // Secrets are base64 encoded
