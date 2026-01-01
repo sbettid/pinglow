@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.20
 
-FROM --platform=$BUILDPLATFORM debian:bullseye-slim
+FROM debian:bullseye-slim
 
 ARG TARGETARCH
 ARG BINARY_NAME
