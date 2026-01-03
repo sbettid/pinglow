@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-runner
+spec:
+  replicas: {{ .Values.runner.minReplicas }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-runner
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-runner
+    spec:
+      serviceAccountName: {{ .Release.Name }}
+      containers:
+        - name: {{ .Release.Name }}-runner
+          image: "ghcr.io/sbettid/{{ .Release.Name }}-runner:{{ .Chart.AppVersion }}"
+          securityContext:
+            readOnlyRootFilesystem: true
+          resources:
+            {{- toYaml .Values.runner.resources | nindent 12 }}
+          volumeMounts:
+            - name: runner-writable
+              mountPath: /home/pinglow-runner
+              readOnly: false
+          envFrom:
+            - secretRef:
+                name: {{ .Values.RedisPasswordSecret }}
+          env: 
+            - name: REDIS_HOST
+              value: "redis"
+            - name: RUNNER_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+      imagePullSecrets:
+        - name: pinglow-pull
+      volumes:
+        - name: runner-writable
+          emptyDir: {}

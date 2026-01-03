@@ -13,7 +13,7 @@ pub async fn fetch_task(
         .arg("workers")
         .arg(runner_name) // consumer name
         .arg("BLOCK")
-        .arg(0) // block indefinitely
+        .arg(15000)
         .arg("COUNT")
         .arg(1) // fetch one message at a time
         .arg("STREAMS")

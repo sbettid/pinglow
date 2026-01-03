@@ -1,11 +1,11 @@
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
 use log::{debug, error, info};
 use pinglow_common::{
     error::SerializeError,
     redis::{init_streams, redis_client},
 };
-use tokio::{select, sync::Semaphore};
+use tokio::select;
 
 use crate::{config::get_config_from_env, executor::execute_check, queue::fetch_task};
 
@@ -19,9 +19,6 @@ pub async fn run() -> anyhow::Result<()> {
     } // conn dropped here
 
     let runner_config = get_config_from_env();
-
-    let max_parallel = 10; // adjust as needed
-    let semaphore = Arc::new(Semaphore::new(max_parallel));
 
     info!("Runner started");
 
@@ -40,10 +37,19 @@ pub async fn run() -> anyhow::Result<()> {
             maybe_check = fetch_task(&mut redis_conn, &runner_config.runner_name) => {
                 match maybe_check {
                     Ok(Some((id, check))) => {
-
-                        let permit = semaphore.clone().acquire_owned().await?;
-
+                        info!("Received check to execute");
+                        let redis_client = redis_client.clone(); // Clone the client
                         tokio::spawn(async move {
+
+                            let mut redis_conn = match redis_client.get_multiplexed_async_connection().await {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    error!("Error getting connection to redis: {e}");
+                                    return;
+                                },
+                            };
+
+                            redis_conn.set_response_timeout(Duration::MAX);
 
                             // Execute check
                             let result = match execute_check(check, &base_path, &namespace).await {
@@ -74,6 +80,7 @@ pub async fn run() -> anyhow::Result<()> {
                                 };
 
                             // Send back the result
+                            info!("Sending back the result");
                             if let Err(e) = redis::cmd("XADD")
                                 .arg("pinglow:results")
                                 .arg("*")
@@ -84,8 +91,6 @@ pub async fn run() -> anyhow::Result<()> {
                                     error!("Error sending check result to redis: {e}");
 
                                 }
-
-                            drop(permit);
                         });
                     }
                     Ok(None) => {

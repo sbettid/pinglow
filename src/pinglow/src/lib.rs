@@ -24,7 +24,6 @@ pub mod config;
 pub mod controller;
 pub mod error;
 pub mod job;
-pub mod redis;
 pub mod results;
 pub mod scheduler;
 

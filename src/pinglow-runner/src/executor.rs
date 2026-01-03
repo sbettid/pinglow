@@ -7,7 +7,6 @@ use anyhow::{bail, Error};
 use chrono::Utc;
 use k8s_openapi::api::core::v1::Secret;
 use kube::{Api, Client};
-use log::info;
 use pinglow_common::{CheckResult, CheckResultStatus, PinglowCheck};
 
 pub async fn execute_check(
