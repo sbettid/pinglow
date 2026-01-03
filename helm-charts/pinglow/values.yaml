@@ -1,7 +1,47 @@
 # Default values for pinglow.
 
+# Secret containing the DB credentials
 DBEnvFromSecret: "pinglow-db-env"
 
+# Secret containing the api key
 ApiKeyEnvFromSecret: "pinglow-api-key"
 
+# Secret containing the redis password
 RedisPasswordSecret: "pinglow-redis-password"
+
+# Pinglow controller configuration
+pinglow:
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+# Runner configuration
+runner:
+  minReplicas: 1
+  maxReplicas: 10
+  # Queue length threshold for scaling
+  queueLengthThreshold: 5
+  # Minimum queue length to activate scaling (scale to 0 when below this)
+  activationThreshold: 1
+  # How often KEDA checks metrics (seconds)
+  pollingInterval: 15
+  # Wait time before scaling down (seconds)
+  cooldownPeriod: 300
+  
+  # Resource limits
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"
+      memory: "512Mi"
+
+# KEDA configuration
+keda:
+  # Install KEDA if not already in cluster
+  enabled: true

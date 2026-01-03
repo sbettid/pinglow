@@ -1,0 +1,56 @@
+# templates/keda-scaledobject.yaml
+{{- if .Values.keda.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ .Release.Name }}-runner-scaler
+  labels:
+    app: {{ .Release.Name }}-runner
+spec:
+  scaleTargetRef:
+    name: {{ .Release.Name }}-runner
+  minReplicaCount: {{ .Values.runner.minReplicas }}
+  maxReplicaCount: {{ .Values.runner.maxReplicas }}
+  pollingInterval: {{ .Values.runner.pollingInterval }}
+  cooldownPeriod: {{ .Values.runner.cooldownPeriod }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 60
+        scaleUp:
+          stabilizationWindowSeconds: 0
+          policies:
+            - type: Percent
+              value: 100
+              periodSeconds: 15
+  triggers:
+    - type: redis
+      metadata:
+        # Redis connection
+        address: redis:6379
+        # Name of your queue
+        listName: "pinglow:checks"
+        # Scale up when queue length exceeds this
+        listLength: "{{ .Values.runner.queueLengthThreshold }}"
+        # Minimum queue length to activate scaling (enables scale to zero)
+        activationListLength: "{{ .Values.runner.activationThreshold }}"
+      authenticationRef:
+        name: {{ .Release.Name }}-redis-auth
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ .Release.Name }}-redis-auth
+  labels:
+    app: {{ .Release.Name }}-runner
+spec:
+  secretTargetRef:
+    - parameter: password
+      name: {{ .Values.RedisPasswordSecret }}
+      key: REDIS_PASSWORD
+{{- end }}
