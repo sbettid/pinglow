@@ -43,5 +43,5 @@ runner:
 
 # KEDA configuration
 keda:
-  # Install KEDA if not already in cluster
-  enabled: true
+  # Enabling this requires KEDA installed in cluster
+  enabled: false

@@ -9,8 +9,3 @@ version: 0.9.5
 
 
 appVersion: "v0.9.5"
-
-dependencies:
-  - name: keda
-    version: "2.15.1"
-    repository: https://kedacore.github.io/charts
