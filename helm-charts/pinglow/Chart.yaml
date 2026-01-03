@@ -5,7 +5,7 @@ description: A Helm chart for Pinglow
 type: application
 
 
-version: 0.9.5
+version: 0.10.0
 
 
-appVersion: "v0.9.5"
+appVersion: "v0.10.0"
