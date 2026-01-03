@@ -29,16 +29,15 @@ spec:
               value: 100
               periodSeconds: 15
   triggers:
-    - type: redis
+    - type: redis-streams
       metadata:
         # Redis connection
-        address: redis:6379
-        # Name of your queue
-        listName: "pinglow:checks"
-        # Scale up when queue length exceeds this
-        listLength: "{{ .Values.runner.queueLengthThreshold }}"
-        # Minimum queue length to activate scaling (enables scale to zero)
-        activationListLength: "{{ .Values.runner.activationThreshold }}"
+        address: redis.pinglow.svc.cluster.local:6379
+        stream: pinglow:checks
+        consumerGroup: workers
+        # Pending messages threshold
+        pendingEntriesCount: "{{ .Values.runner.queueLengthThreshold }}"
+        activationPendingEntriesCount: "{{ .Values.runner.activationThreshold }}"
       authenticationRef:
         name: {{ .Release.Name }}-redis-auth
 ---

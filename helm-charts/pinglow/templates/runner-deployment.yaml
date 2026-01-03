@@ -18,7 +18,7 @@ spec:
           image: "ghcr.io/sbettid/{{ .Release.Name }}-runner:{{ .Chart.AppVersion }}"
           securityContext:
             readOnlyRootFilesystem: true
-            resources:
+          resources:
             {{- toYaml .Values.runner.resources | nindent 12 }}
           volumeMounts:
             - name: runner-writable
