@@ -37,8 +37,19 @@ pub async fn run() -> anyhow::Result<()> {
             maybe_check = fetch_task(&mut redis_conn, &runner_config.runner_name) => {
                 match maybe_check {
                     Ok(Some((id, check))) => {
-
+                        info!("Received check to execute");
+                        let redis_client = redis_client.clone(); // Clone the client
                         tokio::spawn(async move {
+
+                            let mut redis_conn = match redis_client.get_multiplexed_async_connection().await {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    error!("Error getting connection to redis: {e}");
+                                    return;
+                                },
+                            };
+
+                            redis_conn.set_response_timeout(Duration::MAX);
 
                             // Execute check
                             let result = match execute_check(check, &base_path, &namespace).await {
@@ -69,6 +80,7 @@ pub async fn run() -> anyhow::Result<()> {
                                 };
 
                             // Send back the result
+                            info!("Sending back the result");
                             if let Err(e) = redis::cmd("XADD")
                                 .arg("pinglow:results")
                                 .arg("*")

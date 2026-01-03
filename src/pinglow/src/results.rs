@@ -69,13 +69,12 @@ pub async fn run(redis_client: RedisClient, postgres_client: Arc<Client>) -> Res
 async fn wait_for_result(
     conn: &mut MultiplexedConnection,
 ) -> Result<Option<(String, CheckResult)>, Error> {
-    // XREADGROUP BLOCK 5000
     let value: Option<redis::Value> = redis::cmd("XREADGROUP")
         .arg("GROUP")
         .arg("controller")
         .arg("controller-1") // consumer name
         .arg("BLOCK")
-        .arg(0) // block indefinitely
+        .arg(15000) // block indefinitely
         .arg("COUNT")
         .arg(1) // fetch one message at a time
         .arg("STREAMS")
