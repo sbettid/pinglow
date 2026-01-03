@@ -86,26 +86,22 @@ pub async fn execute_check(
         }
     }
 
-    let mut child = command.spawn()?;
+    let output = command.output()?;
 
     // Wait for completion
-    let exit_status = child.wait()?;
-
-    // Extract stdout
-    let mut output = vec![];
-    if let Some(mut stdout) = child.stdout.take() {
-        stdout.read_to_end(&mut output)?;
-    }
+    let exit_status =
+        output
+            .status
+            .code()
+            .ok_or(pinglow_common::error::ExecutionError::ExitCodeError(
+                "Cannot extract exit code".to_string(),
+            ))?;
 
     // Return the check result object
     let result = CheckResult {
         check_name: check.check_name,
-        output: String::from_utf8(output)?,
-        status: CheckResultStatus::from(exit_status.code().ok_or(
-            pinglow_common::error::ExecutionError::ExitCodeError(
-                "Cannot extract exit code".to_string(),
-            ),
-        )?),
+        output: String::from_utf8(output.stdout)?,
+        status: CheckResultStatus::from(exit_status),
         timestamp: Some(Utc::now()),
         telegram_channels: check.telegram_channels.into(),
         mute_notifications: check.mute_notifications,

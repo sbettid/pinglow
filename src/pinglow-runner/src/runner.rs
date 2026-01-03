@@ -24,7 +24,7 @@ pub async fn run() -> anyhow::Result<()> {
 
     loop {
         let mut redis_conn = redis_client.get_multiplexed_async_connection().await?;
-        redis_conn.set_response_timeout(Duration::MAX);
+        redis_conn.set_response_timeout(Duration::from_secs(30));
         let base_path = runner_config.checks_base_path.clone();
         let namespace = runner_config.target_namespace.clone();
         select! {
@@ -38,18 +38,8 @@ pub async fn run() -> anyhow::Result<()> {
                 match maybe_check {
                     Ok(Some((id, check))) => {
                         info!("Received check to execute");
-                        let redis_client = redis_client.clone(); // Clone the client
+                        let redis_client = redis_client.clone();
                         tokio::spawn(async move {
-
-                            let mut redis_conn = match redis_client.get_multiplexed_async_connection().await {
-                                Ok(c) => c,
-                                Err(e) => {
-                                    error!("Error getting connection to redis: {e}");
-                                    return;
-                                },
-                            };
-
-                            redis_conn.set_response_timeout(Duration::MAX);
 
                             // Execute check
                             let result = match execute_check(check, &base_path, &namespace).await {
@@ -59,6 +49,15 @@ pub async fn run() -> anyhow::Result<()> {
                                     return;
                                 },
                             };
+
+                            let mut redis_conn = match redis_client.get_multiplexed_async_connection().await {
+                                Ok(c) => c,
+                                Err(e) => {
+                                    error!("Error getting connection to redis: {e}");
+                                    return;
+                                },
+                            };
+                            redis_conn.set_response_timeout(Duration::from_secs(30));
 
                             // Ack in redis
                             if let Err(e) = redis::cmd("XACK")

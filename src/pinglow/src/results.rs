@@ -12,19 +12,18 @@ use tokio_postgres::Client;
 use crate::process_check_result;
 
 pub async fn run(redis_client: RedisClient, postgres_client: Arc<Client>) -> Result<(), Error> {
-    let mut redis_conn = redis_client
-        .get_multiplexed_async_connection()
-        .await
-        .expect("Cannot get connection to redis");
-
-    redis_conn.set_response_timeout(Duration::MAX);
-
     let mut sigterm = signal(SignalKind::terminate())?;
     let mut sigint = signal(SignalKind::interrupt())?;
 
     let http_client = reqwest::Client::new();
 
     loop {
+        let mut redis_conn = redis_client
+            .get_multiplexed_async_connection()
+            .await
+            .expect("Cannot get connection to redis");
+
+        redis_conn.set_response_timeout(Duration::from_secs(30));
         tokio::select! {
         _ = sigint.recv() => {
         }
@@ -74,7 +73,7 @@ async fn wait_for_result(
         .arg("controller")
         .arg("controller-1") // consumer name
         .arg("BLOCK")
-        .arg(15000) // block indefinitely
+        .arg(15000)
         .arg("COUNT")
         .arg(1) // fetch one message at a time
         .arg("STREAMS")

@@ -71,13 +71,6 @@ pub async fn scheduler_loop(
 ) {
     let mut queue: BTreeMap<Instant, ScheduledCheck> = BTreeMap::new();
 
-    let mut redis_conn = redis_client
-        .get_multiplexed_async_connection()
-        .await
-        .expect("Cannot get connection to redis");
-
-    redis_conn.set_response_timeout(Duration::MAX);
-
     info!("Starting checks scheduling");
 
     // Continuosly loop
@@ -117,11 +110,17 @@ pub async fn scheduler_loop(
                     // Remove the check since it is being executed
                     queue.retain(|_i, check_in_queue| check_in_queue.check.check_name != scheduled_check.check.check_name);
 
+                    let mut redis_conn = redis_client
+                    .get_multiplexed_async_connection()
+                    .await
+                    .expect("Cannot get connection to redis");
+
+                    redis_conn.set_response_timeout(Duration::from_secs(30));
+
                     // Send the task in the queue
                     if let Err(e) = enqueue_check(&mut redis_conn, &scheduled_check.check).await {
                         error!("Error sending check to execution queue: {e}")
                     }
-
 
                     // Schedule the next run
                     scheduled_check.next_run += check_interval;
