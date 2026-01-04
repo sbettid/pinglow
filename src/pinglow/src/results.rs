@@ -4,8 +4,8 @@ use anyhow::Error;
 use log::{debug, error};
 use pinglow_common::redis::parse_stream_payload;
 use pinglow_common::CheckResult;
-use redis::aio::MultiplexedConnection;
 use redis::Client as RedisClient;
+use redis::{aio::MultiplexedConnection, AsyncConnectionConfig};
 use tokio::signal::unix::{signal, SignalKind};
 use tokio_postgres::Client;
 
@@ -17,13 +17,16 @@ pub async fn run(redis_client: RedisClient, postgres_client: Arc<Client>) -> Res
 
     let http_client = reqwest::Client::new();
 
+    let mut async_connection = AsyncConnectionConfig::new();
+    async_connection = async_connection.set_connection_timeout(Some(Duration::from_secs(30)));
+    async_connection = async_connection.set_response_timeout(Some(Duration::from_secs(30)));
+
     loop {
         let mut redis_conn = redis_client
-            .get_multiplexed_async_connection()
+            .get_multiplexed_async_connection_with_config(&async_connection)
             .await
             .expect("Cannot get connection to redis");
 
-        redis_conn.set_response_timeout(Duration::from_secs(30));
         tokio::select! {
         _ = sigint.recv() => {
         }

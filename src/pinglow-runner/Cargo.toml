@@ -25,3 +25,4 @@ kube.workspace = true
 k8s-openapi.workspace = true
 
 base64 = "0.22"
+tokio-util = "0.7"
