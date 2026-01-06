@@ -44,8 +44,8 @@ env_logger.workspace = true
 futures = "0.3"
 refinery = {version = "0.9", features = ["tokio-postgres"]}
 rocket = { version = "0.5", features = ["json"] }
-reqwest = "0.13"
-openssl = { version = "0.10", features = ["vendored"] }
+reqwest = { version = "0.13", default-features = false, features = ["form", "native-tls-vendored", "http2", "charset"] }
+
 dashmap = "6.1.0"
 html-escape = "0.2"
 

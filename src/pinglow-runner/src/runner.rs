@@ -52,7 +52,7 @@ pub async fn run() -> anyhow::Result<()> {
 
         match fetch_task(&mut redis_conn, &runner_config.runner_name).await {
             Ok(Some((id, check))) => {
-                info!("Received check to execute");
+                debug!("Received check to execute");
                 let redis_client = redis_client.clone();
                 tokio::spawn(async move {
                     // Execute check
@@ -97,7 +97,7 @@ pub async fn run() -> anyhow::Result<()> {
                     };
 
                     // Send back the result
-                    info!("Sending back the result");
+                    debug!("Sending back the result");
                     if let Err(e) = redis::cmd("XADD")
                         .arg("pinglow:results")
                         .arg("*")
