@@ -1,18 +1,11 @@
-use std::collections::HashMap;
 use std::fs;
 use std::process::{Command, Stdio};
 
 use anyhow::{bail, Error};
 use chrono::Utc;
-use k8s_openapi::api::core::v1::Secret;
-use kube::{Api, Client};
 use pinglow_common::{CheckResult, CheckResultStatus, PinglowCheck};
 
-pub async fn execute_check(
-    check: PinglowCheck,
-    base_path: &str,
-    namespace: &str,
-) -> Result<CheckResult, Error> {
+pub async fn execute_check(check: PinglowCheck, base_path: &str) -> Result<CheckResult, Error> {
     // Get the script
     let script = check
         .script
@@ -76,9 +69,7 @@ pub async fn execute_check(
     command.arg(script_path).stdout(Stdio::piped());
 
     // Check if we have secrets
-    if let Some(secrets_refs) = check.secrets_refs {
-        let secrets = fetch_secrets(namespace, &secrets_refs).await?;
-
+    if let Some(secrets) = check.secrets {
         // Inject secrets
         for (k, v) in secrets.iter() {
             command.env(k, v);
@@ -108,28 +99,4 @@ pub async fn execute_check(
     };
 
     Ok(result)
-}
-
-async fn fetch_secrets(
-    namespace: &str,
-    secret_names: &[String],
-) -> Result<HashMap<String, String>, Error> {
-    let client = Client::try_default().await?;
-    let secrets_api: Api<Secret> = Api::namespaced(client, namespace);
-
-    let mut map = HashMap::new();
-
-    for secret_name in secret_names {
-        if let Ok(secret) = secrets_api.get(secret_name).await {
-            if let Some(data) = secret.data {
-                for (key, value) in data {
-                    // Secrets are base64 encoded
-                    let decoded = std::str::from_utf8(&value.0)?;
-                    map.insert(key.clone(), decoded.to_string());
-                }
-            }
-        }
-    }
-
-    Ok(map)
 }
