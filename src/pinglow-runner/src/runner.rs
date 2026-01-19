@@ -47,7 +47,6 @@ pub async fn run() -> anyhow::Result<()> {
             .await?;
 
         let base_path = runner_config.checks_base_path.clone();
-        let namespace = runner_config.target_namespace.clone();
         let connection_config = async_connection.clone();
 
         match fetch_task(&mut redis_conn, &runner_config.runner_name).await {
@@ -56,7 +55,7 @@ pub async fn run() -> anyhow::Result<()> {
                 let redis_client = redis_client.clone();
                 tokio::spawn(async move {
                     // Execute check
-                    let result = match execute_check(check, &base_path, &namespace).await {
+                    let result = match execute_check(check, &base_path).await {
                         Ok(r) => r,
                         Err(e) => {
                             error!("Error executing check: {e}");

@@ -3,7 +3,7 @@ use kube::CustomResource;
 use log::warn;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, fmt::Display, sync::Arc};
+use std::{cmp::Ordering, collections::HashMap, fmt::Display, sync::Arc};
 use tokio::time::Instant;
 use tokio_postgres::Client;
 use utoipa::ToSchema;
@@ -194,12 +194,19 @@ pub struct ScriptSpec {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Secret {
+    pub name: String,
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PinglowCheck {
     pub passive: bool,
     pub script: Option<ScriptSpec>,
     pub interval: Option<u64>,
     pub check_name: String,
-    pub secrets_refs: Option<Vec<String>>,
+    pub secrets: Option<HashMap<String, String>>,
     pub telegram_channels: Vec<ConcreteTelegramChannel>,
     pub mute_notifications: Option<bool>,
     pub mute_notifications_until: Option<DateTime<Utc>>,

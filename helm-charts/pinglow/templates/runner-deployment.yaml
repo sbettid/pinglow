@@ -12,7 +12,6 @@ spec:
       labels:
         app: {{ .Release.Name }}-runner
     spec:
-      serviceAccountName: {{ .Release.Name }}
       containers:
         - name: {{ .Release.Name }}-runner
           image: "ghcr.io/sbettid/{{ .Release.Name }}-runner:{{ .Chart.AppVersion }}"

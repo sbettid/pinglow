@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Error;
 use chrono::{Local, Utc};
@@ -23,7 +23,6 @@ pub mod check;
 pub mod config;
 pub mod controller;
 pub mod error;
-pub mod job;
 pub mod results;
 pub mod scheduler;
 
@@ -88,7 +87,18 @@ pub async fn load_single_runnable_check(
         }
     }
 
-    let secrets_refs = &check.spec.secretRefs;
+    // Check if we have secrets
+    let secrets = if let Some(secrets_refs) = &check.spec.secretRefs {
+        Some(
+            fetch_secrets(&config.target_namespace, secrets_refs)
+                .await
+                .map_err(|e| {
+                    ReconcileError::GeneralError(format!("Error fetching secrets: {e}"))
+                })?,
+        )
+    } else {
+        None
+    };
 
     // Build the runnable check object
     let runnable_check = PinglowCheck {
@@ -96,13 +106,37 @@ pub async fn load_single_runnable_check(
         script: script.map(|s| s.spec),
         interval: check.spec.interval,
         check_name,
-        secrets_refs: secrets_refs.clone(),
+        secrets,
         telegram_channels,
         mute_notifications: check.spec.muteNotifications,
         mute_notifications_until: check.spec.muteNotificationsUntil,
     };
 
     Ok(runnable_check)
+}
+
+async fn fetch_secrets(
+    namespace: &str,
+    secret_names: &[String],
+) -> Result<HashMap<String, String>, Error> {
+    let client = Client::try_default().await?;
+    let secrets_api: Api<Secret> = Api::namespaced(client, namespace);
+
+    let mut map = HashMap::new();
+
+    for secret_name in secret_names {
+        if let Ok(secret) = secrets_api.get(secret_name).await {
+            if let Some(data) = secret.data {
+                for (key, value) in data {
+                    // Secrets are base64 encoded
+                    let decoded = std::str::from_utf8(&value.0)?;
+                    map.insert(key.clone(), decoded.to_string());
+                }
+            }
+        }
+    }
+
+    Ok(map)
 }
 
 /**
