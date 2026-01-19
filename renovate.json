@@ -8,5 +8,18 @@
   ],
   "reviewers": [
     "sbettid"
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": [
+        "kube",
+        "k8s-openapi"
+      ],
+      "groupName": "kube-deps",
+      "matchUpdateTypes": [
+        "minor",
+        "major"
+      ]
+    }
   ]
 }
