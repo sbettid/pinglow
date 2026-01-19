@@ -48,10 +48,18 @@ async fn handle_check_event(
                 return;
             };
 
-            let next_run = Instant::now() + Duration::from_secs(interval);
-
             // Update the scheduled check
-            queue.retain(|_i, scheduled_check| scheduled_check.check.check_name != check_name);
+            let removed: Option<ScheduledCheck> = queue
+                .extract_if(.., |_, sc| sc.check.check_name == check_name)
+                .map(|(_, sc)| sc)
+                .next();
+
+            let next_run = if let Some(removed) = removed {
+                removed.next_run
+            } else {
+                Instant::now() + Duration::from_secs(interval)
+            };
+
             queue.insert(next_run, ScheduledCheck { next_run, check });
         }
         RunnableCheckEvent::Remove(check_name) => {
