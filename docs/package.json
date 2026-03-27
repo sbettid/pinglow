@@ -30,7 +30,7 @@
     "@docusaurus/types": "3.9.2",
     "@types/react": "^19.1.13",
     "ts-node": "^10.9.2",
-    "typescript": "~5.9.0"
+    "typescript": "~6.0.0"
   },
   "browserslist": {
     "production": [
