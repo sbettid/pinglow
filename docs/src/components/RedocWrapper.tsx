@@ -1,6 +1,7 @@
-import React, { ReactNode } from 'react';
 import { RedocStandalone, RedocStandaloneProps } from 'redoc';
 import { useColorMode } from '@docusaurus/theme-common';
+import React, { useEffect, useState, ReactNode } from 'react';
+import BrowserOnly from '@docusaurus/BrowserOnly';
 
 export default function RedocWrapper(): ReactNode {
     const { colorMode } = useColorMode();
@@ -51,13 +52,21 @@ export default function RedocWrapper(): ReactNode {
     };
 
     return (
-        <RedocStandalone
-            specUrl="/pinglow/openapi.json"
-            options={{
-                nativeScrollbars: true,
-                hideDownloadButton: true,
-                theme: colorMode === 'dark' ? darkTheme : lightTheme,
+        <BrowserOnly fallback={<div>Loading API documentation...</div>}>
+            {() => {
+                const { RedocStandalone } = require('redoc');
+
+                return (
+                    <RedocStandalone
+                        specUrl="/pinglow/openapi.json"
+                        options={{
+                            nativeScrollbars: true,
+                            hideDownloadButton: true,
+                            theme: colorMode === 'dark' ? darkTheme : lightTheme,
+                        }}
+                    />
+                );
             }}
-        />
+        </BrowserOnly>
     );
 }
