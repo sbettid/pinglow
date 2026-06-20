@@ -44,10 +44,12 @@ env_logger.workspace = true
 futures = "0.3"
 refinery = {version = "0.9", features = ["tokio-postgres"]}
 rocket = { version = "0.5", features = ["json"] }
-reqwest = { version = "0.13", default-features = false, features = ["form", "native-tls-vendored", "http2", "charset"] }
+reqwest = { version = "0.13", default-features = false, features = ["form", "native-tls-vendored", "http2", "charset", "multipart"] }
 
 dashmap = "6.1.0"
 html-escape = "0.2"
+
+base64 = "0.22"
 
 [dev-dependencies]
 rustfmt = "0.10.0"

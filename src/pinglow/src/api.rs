@@ -423,6 +423,8 @@ pub async fn unmute_check(
 pub struct ProcessCheckResultPayload {
     output: String,
     status: i32,
+    #[serde(default)]
+    image_jpg_base64: Option<String>, // Base64 image
 }
 
 #[utoipa::path(
@@ -468,17 +470,21 @@ pub async fn process_check_result(
         mute_notifications: check.mute_notifications,
         mute_notifications_until: check.mute_notifications_until,
     };
-
     let http_client = reqwest::Client::new();
 
-    crate::process_check_result(check_result, client, &http_client)
-        .await
-        .map_err(|err| {
-            status::Custom(
-                Status::InternalServerError,
-                format!("Error processing check result: {err}"),
-            )
-        })?;
+    crate::process_check_result(
+        check_result,
+        check_result_payload.image_jpg_base64,
+        client,
+        &http_client,
+    )
+    .await
+    .map_err(|err| {
+        status::Custom(
+            Status::InternalServerError,
+            format!("Error processing check result: {err}"),
+        )
+    })?;
 
     Ok(())
 }

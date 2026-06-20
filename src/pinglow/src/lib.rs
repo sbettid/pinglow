@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Error;
+use base64::{engine::general_purpose, Engine};
 use chrono::{Local, Utc};
 use html_escape::encode_safe;
 use k8s_openapi::api::core::v1::Secret;
@@ -145,6 +146,7 @@ async fn fetch_secrets(
  */
 pub async fn process_check_result(
     result: CheckResult,
+    image_jpg_base64: Option<String>,
     db_client: &Arc<PostgresClient>,
     http_client: &reqwest::Client,
 ) -> Result<(), Error> {
@@ -164,24 +166,57 @@ pub async fn process_check_result(
             _ => true, // if mute_notifications is None or false we send the notification
         }
     {
-        for channel in result.telegram_channels.iter() {
-            let url = format!(
-                "https://api.telegram.org/bot{}/sendMessage",
-                channel.bot_token
-            );
-            let timestamp_local = result
-                .timestamp
-                .unwrap_or_else(Utc::now)
-                .with_timezone(&Local);
+        let timestamp_local = result
+            .timestamp
+            .unwrap_or_else(Utc::now)
+            .with_timezone(&Local);
 
-            match  http_client.post(&url).form(&[
+        let message = format!("<b>Date</b>: {0}\n<b>Check name</b>: {1} \n<b>Status</b>: {2:?}\n<b>Output</b>\n<pre>{3}</pre>", timestamp_local.format("%Y-%m-%d %H:%M:%S %Z"), result.check_name, result.status, encode_safe(&result.get_output()));
+
+        let decoded_image: Option<Vec<u8>> = image_jpg_base64
+            .as_ref()
+            .map(|img| general_purpose::STANDARD.decode(img))
+            .transpose()?;
+
+        for channel in result.telegram_channels.iter() {
+            let result = if let Some(ref image) = decoded_image {
+                let url = format!(
+                    "https://api.telegram.org/bot{}/sendPhoto",
+                    channel.bot_token
+                );
+
+                let form = reqwest::multipart::Form::new()
+                    .text("chat_id", channel.chat_id.clone())
+                    .text("caption", message.clone())
+                    .text("parse_mode", "HTML")
+                    .part(
+                        "photo",
+                        reqwest::multipart::Part::bytes(image.clone())
+                            .file_name(format!("{}.jpg", result.check_name))
+                            .mime_str("image/jpeg")?,
+                    );
+
+                http_client.post(&url).multipart(form).send().await
+            } else {
+                let url = format!(
+                    "https://api.telegram.org/bot{}/sendMessage",
+                    channel.bot_token
+                );
+
+                http_client
+                    .post(&url)
+                    .form(&[
                         ("chat_id", channel.chat_id.clone()),
-                        ("text", format!("<b>Date</b>: {0}\n<b>Check name</b>: {1} \n<b>Status</b>: {2:?}\n<b>Output</b>\n<pre>{3}</pre>", timestamp_local.format("%Y-%m-%d %H:%M:%S %Z"), result.check_name, result.status, encode_safe(&result.get_output()))),
+                        ("text", message.clone()),
                         ("parse_mode", "HTML".to_string()),
-                    ]).send().await {
-                        Ok(_) => {},
-                        Err(e) => error!("Error when sending check result to Telegram channel: {e}"),
-                    }
+                    ])
+                    .send()
+                    .await
+            };
+
+            if let Err(e) = result {
+                error!("Error when sending check result to Telegram channel: {e}");
+            }
         }
     }
     Ok(())
