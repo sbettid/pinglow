@@ -37,7 +37,7 @@ pub async fn run(redis_client: RedisClient, postgres_client: Arc<Client>) -> Res
             match res {
                 Ok(Some((id, result))) => {
                     // Process the result
-                    process_check_result(result, &postgres_client, &http_client).await?;
+                    process_check_result(result, None, &postgres_client, &http_client).await?;
 
                     // Ack in redis
                     redis::cmd("XACK")
