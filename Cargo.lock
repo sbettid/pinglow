@@ -665,7 +665,7 @@ version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a1c3cc8e57274ec99de65301228b537f1e4eedc1b8e0f9411c6caac8ae7308f"
 dependencies = [
- "log 0.4.32",
+ "log 0.4.33",
  "regex 1.12.2",
 ]
 
@@ -689,7 +689,7 @@ dependencies = [
  "anstyle",
  "env_filter",
  "jiff",
- "log 0.4.32",
+ "log 0.4.33",
 ]
 
 [[package]]
@@ -918,7 +918,7 @@ checksum = "5cc16584ff22b460a382b7feec54b23d2908d858152e5739a120b949293bd74e"
 dependencies = [
  "cc",
  "libc",
- "log 0.4.32",
+ "log 0.4.33",
  "rustversion",
  "windows",
 ]
@@ -1239,7 +1239,7 @@ dependencies = [
  "http 1.4.0",
  "hyper 1.8.1",
  "hyper-util",
- "log 0.4.32",
+ "log 0.4.33",
  "rustls",
  "rustls-native-certs",
  "rustls-pki-types",
@@ -1311,7 +1311,7 @@ dependencies = [
  "core-foundation-sys",
  "iana-time-zone-haiku",
  "js-sys",
- "log 0.4.32",
+ "log 0.4.33",
  "wasm-bindgen",
  "windows-core",
 ]
@@ -1503,7 +1503,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a3546dc96b6d42c5f24902af9e2538e82e39ad350b0c766eb3fbf2d8f3d8359"
 dependencies = [
  "jiff-static",
- "log 0.4.32",
+ "log 0.4.33",
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
@@ -1751,14 +1751,14 @@ version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e19e8d5c34a3e0e2223db8e060f9e8264aeeb5c5fc64a4ee9965c062211c024b"
 dependencies = [
- "log 0.4.32",
+ "log 0.4.33",
 ]
 
 [[package]]
 name = "log"
-version = "0.4.32"
+version = "0.4.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "953f07c43838f8e6f9758cab68bf5bed85465e7587ebe0b823f1bcd81978ad3a"
+checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "loom"
@@ -1843,7 +1843,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "465500e14ea162429d264d44189adc38b199b62b1c21eea9f69e4b73cb03bbf2"
 dependencies = [
  "libc",
- "log 0.4.32",
+ "log 0.4.33",
  "openssl",
  "openssl-probe",
  "openssl-sys",
@@ -2155,7 +2155,7 @@ dependencies = [
  "html-escape",
  "k8s-openapi",
  "kube",
- "log 0.4.32",
+ "log 0.4.33",
  "pinglow-common",
  "redis",
  "refinery",
@@ -2178,7 +2178,7 @@ dependencies = [
  "chrono",
  "k8s-openapi",
  "kube",
- "log 0.4.32",
+ "log 0.4.33",
  "redis",
  "schemars",
  "serde",
@@ -2199,7 +2199,7 @@ dependencies = [
  "env_logger 0.11.10",
  "k8s-openapi",
  "kube",
- "log 0.4.32",
+ "log 0.4.33",
  "pinglow-common",
  "redis",
  "serde",
@@ -2572,7 +2572,7 @@ checksum = "24eeafd893124f29183dd6afa9137a27e7bef59250223b8b660005279c60aea4"
 dependencies = [
  "async-trait",
  "cfg-if",
- "log 0.4.32",
+ "log 0.4.33",
  "regex 1.12.2",
  "serde",
  "siphasher",
@@ -2668,7 +2668,7 @@ dependencies = [
  "hyper-tls",
  "hyper-util",
  "js-sys",
- "log 0.4.32",
+ "log 0.4.33",
  "mime",
  "native-tls",
  "percent-encoding",
@@ -2717,7 +2717,7 @@ dependencies = [
  "figment",
  "futures",
  "indexmap",
- "log 0.4.32",
+ "log 0.4.33",
  "memchr",
  "multer",
  "num_cpus",
@@ -2769,7 +2769,7 @@ dependencies = [
  "http 0.2.12",
  "hyper 0.14.32",
  "indexmap",
- "log 0.4.32",
+ "log 0.4.33",
  "memchr",
  "pear",
  "percent-encoding",
@@ -2846,7 +2846,7 @@ version = "0.23.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "533f54bc6a7d4f647e46ad909549eda97bf5afc1585190ef692b4286b198bd8f"
 dependencies = [
- "log 0.4.32",
+ "log 0.4.33",
  "once_cell",
  "ring",
  "rustls-pki-types",
@@ -3527,7 +3527,7 @@ dependencies = [
  "fallible-iterator",
  "futures-channel",
  "futures-util",
- "log 0.4.32",
+ "log 0.4.33",
  "parking_lot",
  "percent-encoding",
  "phf",
@@ -3721,7 +3721,7 @@ version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
- "log 0.4.32",
+ "log 0.4.33",
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
@@ -3754,7 +3754,7 @@ version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3"
 dependencies = [
- "log 0.4.32",
+ "log 0.4.33",
  "once_cell",
  "tracing-core",
 ]
@@ -4465,7 +4465,7 @@ dependencies = [
  "anyhow",
  "bitflags 2.10.0",
  "indexmap",
- "log 0.4.32",
+ "log 0.4.33",
  "serde",
  "serde_derive",
  "serde_json",
@@ -4484,7 +4484,7 @@ dependencies = [
  "anyhow",
  "id-arena",
  "indexmap",
- "log 0.4.32",
+ "log 0.4.33",
  "semver 1.0.27",
  "serde",
  "serde_derive",
