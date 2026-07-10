@@ -15,7 +15,7 @@
     "typecheck": "tsc"
   },
   "dependencies": {
-    "@docusaurus/core": "3.10.1",
+    "@docusaurus/core": "3.10.2",
     "@docusaurus/faster": "^3.10.1",
     "@docusaurus/preset-classic": "^3.9.1",
     "@mdx-js/react": "^3.0.0",
@@ -26,9 +26,9 @@
     "redoc": "^2.5.0"
   },
   "devDependencies": {
-    "@docusaurus/module-type-aliases": "3.10.1",
-    "@docusaurus/tsconfig": "3.10.1",
-    "@docusaurus/types": "3.10.1",
+    "@docusaurus/module-type-aliases": "3.10.2",
+    "@docusaurus/tsconfig": "3.10.2",
+    "@docusaurus/types": "3.10.2",
     "@types/react": "^19.1.13",
     "ts-node": "^10.9.2",
     "typescript": "~6.0.0"
