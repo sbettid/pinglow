@@ -15,11 +15,7 @@
         "kube",
         "k8s-openapi"
       ],
-      "groupName": "kube-deps",
-      "matchUpdateTypes": [
-        "minor",
-        "major"
-      ]
+      "groupName": "kube-deps"
     }
   ]
 }
