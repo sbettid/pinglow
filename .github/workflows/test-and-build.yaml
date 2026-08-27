@@ -224,6 +224,7 @@ jobs:
     needs:
       - docker-runner
       - docker-pinglow
+      - deploy
 
     permissions:
       contents: write
