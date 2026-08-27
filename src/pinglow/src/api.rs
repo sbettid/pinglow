@@ -1,16 +1,20 @@
 use std::{
     collections::{BTreeMap, HashMap},
     sync::Arc,
+    time::Duration,
 };
 
 use crate::{
     check::{Check, SharedPinglowChecks},
     config::PinglowConfig,
+    scheduler::enqueue_check,
 };
 use chrono::{DateTime, FixedOffset, Utc};
 use kube::Api;
 use log::warn;
-use pinglow_common::{CheckResult, CheckResultStatus, PinglowCheck, ScriptLanguage};
+use pinglow_common::{
+    redis::redis_client, CheckResult, CheckResultStatus, PinglowCheck, ScriptLanguage,
+};
 use rocket::{
     delete, get,
     http::Status,
@@ -50,7 +54,8 @@ pub async fn start_rocket(
                 get_performance_data,
                 mute_check,
                 unmute_check,
-                process_check_result
+                process_check_result,
+                schedule_now
             ],
         );
 
@@ -489,9 +494,67 @@ pub async fn process_check_result(
     Ok(())
 }
 
+#[utoipa::path(
+    post,
+    path = "/check/{target_check}/schedule-now",
+     params(
+        ("target_check" = String, Path, description = "The check we would like to schedule now")
+    ),
+    responses(
+        (status = 200, description = "Whether the immediate scheduling operation was successful")
+    )
+)]
+#[post("/check/<target_check>/schedule-now")]
+pub async fn schedule_now(
+    _key: ApiKey,
+    checks: &State<SharedPinglowChecks>,
+    target_check: &str,
+) -> Result<(), status::Custom<String>> {
+    // Read actual shared checks
+    let runnable_checks = checks.write().await;
+
+    // Ensure we can find the target check
+    let (_check_name, check) = runnable_checks
+        .iter()
+        .find(|&check| check.0 == target_check)
+        .ok_or(status::Custom(
+            Status::NotFound,
+            "Invalid target check".into(),
+        ))?;
+
+    // Get redis client to enqueue the check
+    let redis_client = redis_client().map_err(|e| {
+        status::Custom(
+            Status::InternalServerError,
+            format!("Error retrieving the redis client: {e}"),
+        )
+    })?;
+
+    let mut redis_conn = redis_client
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|e| {
+            status::Custom(
+                Status::InternalServerError,
+                format!("Error retrieving the connection to redis: {e}"),
+            )
+        })?;
+
+    redis_conn.set_response_timeout(Duration::from_secs(30));
+
+    enqueue_check(&mut redis_conn, check).await.map_err(|e| {
+        status::Custom(
+            Status::InternalServerError,
+            format!("Error adding check to run queue: {e}"),
+        )
+    })?;
+
+    Ok(())
+}
+
 #[derive(OpenApi)]
 #[openapi(
-    paths(get_checks, get_check_status, get_performance_data, mute_check, unmute_check, process_check_result),
+    paths(get_checks, get_check_status, get_performance_data, mute_check, unmute_check, process_check_result, schedule_now),
     components(schemas(
         SimpleCheckDto,
         SimpleCheckResultDto,
