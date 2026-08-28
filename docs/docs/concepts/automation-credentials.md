@@ -1,6 +1,8 @@
 ---
-title: Automation credentials
+sidebar_position: 4
 ---
+
+# Automation Credentials
 
 Automation clients authenticate with Pinglow using API keys generated from `ApiKeyBinding` resources. These are separate from browser-based OIDC authentication.
 
@@ -53,11 +55,7 @@ curl -H "x-api-key: <your-api-key>" \
 
 ## Role permissions
 
-Same as user bindings:
-
-- **viewer**: Read-only access to checks and performance data.
-- **operator**: View checks and perform operations (mute notifications, schedule checks, submit results).
-- **admin**: Full access including operator capabilities.
+For the specific available Pinglow roles please check out the [pinglow roles](/docs/concepts/roles) section.
 
 ## Secret ownership
 

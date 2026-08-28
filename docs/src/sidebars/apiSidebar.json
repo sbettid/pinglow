@@ -22,6 +22,11 @@
         },
         {
           "type": "link",
+          "label": "POST /check/{target_check}/result",
+          "href": "/docs/restapi#operation/process_check_result"
+        },
+        {
+          "type": "link",
           "label": "GET /checks",
           "href": "/docs/restapi#operation/get_checks"
         },

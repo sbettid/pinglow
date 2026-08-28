@@ -22,7 +22,10 @@ const sidebars: SidebarsConfig = {
       items: [
         'concepts/checks-scripts',
         'concepts/continuous-deployment',
-        'concepts/notifications'
+        'concepts/notifications',
+        'concepts/automation-credentials',
+        'concepts/user-bindings',
+        'concepts/roles',
       ],
     },
     ...apiSidebar.apiSidebar

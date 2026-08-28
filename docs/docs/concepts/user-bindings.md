@@ -1,8 +1,15 @@
 ---
-title: User bindings
+sidebar_position: 5
 ---
 
+# OIDC authentication and user roles
+
+To activate also OIDC authentication for browser logins, please ensure the associated 
+environment variables have been set during the [deployment](/docs/deployment/).
+
 User bindings connect OIDC identities to Pinglow roles, enabling browser-based authentication with declarative role assignment.
+
+For more information about the specific roles please see the [pinglow roles](/docs/concepts/roles) section.
 
 ## PinglowUserBinding resource
 
@@ -26,12 +33,6 @@ spec:
 - **role** (required): One of `viewer`, `operator`, or `admin`.
 
 At least one of `email` or `subject` must be specified.
-
-## Role permissions
-
-- **viewer**: Read-only access to checks and performance data.
-- **operator**: View checks and perform operations (mute notifications, schedule checks, submit results).
-- **admin**: Full access including operator capabilities.
 
 ## OIDC provider integration
 
