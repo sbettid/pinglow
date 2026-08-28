@@ -1,0 +1,21 @@
+changelog:
+  categories:
+    - title: 🚀 Features
+      labels:
+        - enhancement
+
+    - title: 🐛 Bug Fixes
+      labels:
+        - bug
+
+    - title: 📦 Dependencies
+      authors:
+        - renovate[bot]
+
+    - title: 📝 Documentation
+      labels:
+        - documentation
+
+    - title: 🔧 Other Changes
+      labels:
+        - "*"
