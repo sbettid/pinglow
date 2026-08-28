@@ -5,6 +5,7 @@ use std::{
 };
 
 use crate::{
+    auth::{self, Authenticated, Operator, OperatorApiKey},
     check::{Check, SharedPinglowChecks},
     config::PinglowConfig,
     scheduler::enqueue_check,
@@ -16,14 +17,8 @@ use pinglow_common::{
     redis::redis_client, CheckResult, CheckResultStatus, PinglowCheck, ScriptLanguage,
 };
 use rocket::{
-    delete, get,
-    http::Status,
-    post, put,
-    request::{FromRequest, Outcome},
-    response::status,
-    routes,
-    serde::json::Json,
-    Request, Rocket, Shutdown, State,
+    delete, get, http::Status, post, put, response::status, routes, serde::json::Json, Rocket,
+    Shutdown, State,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -37,7 +32,17 @@ pub async fn start_rocket(
     pinglow_config: PinglowConfig,
     shared_checks: SharedPinglowChecks,
     client: Arc<tokio_postgres::Client>,
-) -> Result<(Rocket<rocket::Ignite>, Shutdown), rocket::Error> {
+) -> Result<(Rocket<rocket::Ignite>, Shutdown), Box<dyn std::error::Error + Send + Sync>> {
+    let redis = redis_client()?;
+    let auth_state = auth::create_auth_state(&pinglow_config, redis).await?;
+    tokio::spawn(auth::watch_bindings(
+        pinglow_config.clone(),
+        auth_state.clone(),
+    ));
+    tokio::spawn(auth::reconcile_api_keys(
+        pinglow_config.clone(),
+        auth_state.clone(),
+    ));
     let figment = rocket::Config::figment()
         .merge(("address", "0.0.0.0"))
         .merge(("port", 8000));
@@ -46,9 +51,14 @@ pub async fn start_rocket(
         .manage(pinglow_config)
         .manage(shared_checks)
         .manage(client)
+        .manage(auth_state)
         .mount(
             "/",
             routes![
+                auth::login,
+                auth::callback,
+                auth::me,
+                auth::logout,
                 get_checks,
                 get_check_status,
                 get_performance_data,
@@ -64,33 +74,6 @@ pub async fn start_rocket(
     let shutdown = rocket.shutdown();
 
     Ok((rocket, shutdown))
-}
-
-pub struct ApiKey;
-
-// FromRequest trait to validate the provided ApiKey
-#[rocket::async_trait]
-impl<'r> FromRequest<'r> for ApiKey {
-    type Error = ();
-
-    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
-        let config = request.rocket().state::<PinglowConfig>();
-        let config = match config {
-            Some(c) => c,
-            None => return Outcome::Error((Status::InternalServerError, ())),
-        };
-        let keys: Vec<_> = request.headers().get("x-api-key").collect();
-        if keys.len() != 1 {
-            return Outcome::Error((Status::Unauthorized, ()));
-        }
-
-        let client_key = keys[0];
-        if config.api_key == client_key {
-            Outcome::Success(ApiKey)
-        } else {
-            Outcome::Error((Status::Unauthorized, ()))
-        }
-    }
 }
 
 #[derive(Serialize, ToSchema, Debug)]
@@ -132,7 +115,7 @@ pub struct SimpleCheckResultDto {
 )]
 #[get("/checks")]
 pub async fn get_checks(
-    _key: ApiKey,
+    _user: Authenticated,
     checks: &State<SharedPinglowChecks>,
 ) -> Json<Vec<SimpleCheckDto>> {
     let runnable_checks = checks.read().await;
@@ -155,7 +138,7 @@ pub async fn get_checks(
 )]
 #[get("/check-status/<target_check>")]
 pub async fn get_check_status(
-    _key: ApiKey,
+    _user: Authenticated,
     checks: &State<SharedPinglowChecks>,
     client: &State<Arc<Client>>,
     target_check: &str,
@@ -212,7 +195,7 @@ struct GroupedPerfData {
 )]
 #[get("/performance-data/<target_check>")]
 pub async fn get_performance_data(
-    _key: ApiKey,
+    _user: Authenticated,
     checks: &State<SharedPinglowChecks>,
     client: &State<Arc<Client>>,
     target_check: &str,
@@ -265,7 +248,7 @@ pub async fn get_performance_data(
 )]
 #[put("/check/<target_check>/mute?<until>")]
 pub async fn mute_check(
-    _key: ApiKey,
+    _user: Operator,
     checks: &State<SharedPinglowChecks>,
     pinglow_config: &State<PinglowConfig>,
     target_check: &str,
@@ -363,7 +346,7 @@ pub async fn mute_check(
 )]
 #[delete("/check/<target_check>/mute")]
 pub async fn unmute_check(
-    _key: ApiKey,
+    _user: Operator,
     checks: &State<SharedPinglowChecks>,
     pinglow_config: &State<PinglowConfig>,
     target_check: &str,
@@ -444,7 +427,7 @@ pub struct ProcessCheckResultPayload {
 )]
 #[post("/check/<target_check>/result", data = "<check_result_payload>")]
 pub async fn process_check_result(
-    _key: ApiKey,
+    _key: OperatorApiKey,
     checks: &State<SharedPinglowChecks>,
     client: &State<Arc<Client>>,
     target_check: &str,
@@ -506,7 +489,7 @@ pub async fn process_check_result(
 )]
 #[post("/check/<target_check>/schedule-now")]
 pub async fn schedule_now(
-    _key: ApiKey,
+    _user: Operator,
     checks: &State<SharedPinglowChecks>,
     target_check: &str,
 ) -> Result<(), status::Custom<String>> {
@@ -587,5 +570,89 @@ impl Modify for SecurityAddon {
                 )),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pinglow_common::CheckResultStatus;
+
+    #[test]
+    fn test_simple_check_dto_creation() {
+        let check = PinglowCheck {
+            passive: true,
+            script: None,
+            interval: Some(300),
+            check_name: "test-check".to_string(),
+            secrets: None,
+            telegram_channels: vec![],
+            mute_notifications: None,
+            mute_notifications_until: None,
+        };
+
+        let dto = SimpleCheckDto::from(&Arc::new(check));
+        assert_eq!(dto.check_name, "test-check");
+        assert_eq!(dto.passive, true);
+        assert_eq!(dto.interval, Some(300));
+    }
+
+    #[test]
+    fn test_simple_check_dto_non_passive() {
+        let check = PinglowCheck {
+            passive: false,
+            script: None,
+            interval: Some(60),
+            check_name: "active-check".to_string(),
+            secrets: None,
+            telegram_channels: vec![],
+            mute_notifications: None,
+            mute_notifications_until: None,
+        };
+
+        let dto = SimpleCheckDto::from(&Arc::new(check));
+        assert_eq!(dto.passive, false);
+        assert_eq!(dto.interval, Some(60));
+    }
+
+    #[test]
+    fn test_check_result_status_ok() {
+        assert_eq!(CheckResultStatus::Ok, CheckResultStatus::Ok);
+        assert_ne!(CheckResultStatus::Ok, CheckResultStatus::Warning);
+    }
+
+    #[test]
+    fn test_check_result_status_to_number() {
+        assert_eq!(CheckResultStatus::Ok.to_number(), 0);
+        assert_eq!(CheckResultStatus::Warning.to_number(), 1);
+        assert_eq!(CheckResultStatus::Critical.to_number(), 2);
+        assert_eq!(CheckResultStatus::CheckError.to_number(), 3);
+        assert_eq!(CheckResultStatus::Pending.to_number(), 4);
+    }
+
+    #[test]
+    fn test_check_result_status_from_i32() {
+        assert_eq!(CheckResultStatus::from(0i32), CheckResultStatus::Ok);
+        assert_eq!(CheckResultStatus::from(1i32), CheckResultStatus::Warning);
+        assert_eq!(CheckResultStatus::from(2i32), CheckResultStatus::Critical);
+        assert_eq!(CheckResultStatus::from(3i32), CheckResultStatus::CheckError);
+        assert_eq!(CheckResultStatus::from(4i32), CheckResultStatus::Pending);
+        assert_eq!(
+            CheckResultStatus::from(99i32),
+            CheckResultStatus::CheckError
+        );
+    }
+
+    #[test]
+    fn test_user_role_permissions() {
+        use pinglow_common::UserRole;
+
+        let viewer = UserRole::Viewer;
+        let operator = UserRole::Operator;
+        let admin = UserRole::Admin;
+
+        assert_ne!(viewer, operator);
+        assert_ne!(operator, admin);
+        assert_ne!(viewer, admin);
     }
 }

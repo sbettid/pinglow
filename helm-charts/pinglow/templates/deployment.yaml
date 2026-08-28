@@ -18,7 +18,8 @@ spec:
           image: "ghcr.io/sbettid/{{ .Release.Name }}:{{ .Chart.AppVersion }}"
           envFrom:
             - secretRef:
-                name: {{ .Values.ApiKeyEnvFromSecret }}
+                name: {{ .Values.OidcEnvFromSecret }}
+                optional: true
             - secretRef:
                 name: {{ .Values.DBEnvFromSecret }}
             - secretRef:

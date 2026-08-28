@@ -193,6 +193,39 @@ pub struct ScriptSpec {
     pub python_requirements: Option<Vec<String>>,
 }
 
+#[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
+#[kube(
+    group = "pinglow.io",
+    version = "v1alpha1",
+    kind = "PinglowUserBinding",
+    namespaced
+)]
+pub struct PinglowUserBindingSpec {
+    pub role: UserRole,
+    pub subject: Option<String>,
+    pub email: Option<String>,
+}
+
+#[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
+#[kube(
+    group = "pinglow.io",
+    version = "v1alpha1",
+    kind = "ApiKeyBinding",
+    namespaced
+)]
+pub struct ApiKeyBindingSpec {
+    pub role: UserRole,
+    pub secret_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum UserRole {
+    Viewer,
+    Operator,
+    Admin,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Secret {
     pub name: String,
@@ -233,5 +266,151 @@ impl PartialOrd for ScheduledCheck {
 impl Ord for ScheduledCheck {
     fn cmp(&self, other: &Self) -> Ordering {
         other.next_run.cmp(&self.next_run)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_user_role_equality() {
+        assert_eq!(UserRole::Admin, UserRole::Admin);
+        assert_eq!(UserRole::Operator, UserRole::Operator);
+        assert_eq!(UserRole::Viewer, UserRole::Viewer);
+    }
+
+    #[test]
+    fn test_user_role_inequality() {
+        assert_ne!(UserRole::Admin, UserRole::Operator);
+        assert_ne!(UserRole::Operator, UserRole::Viewer);
+        assert_ne!(UserRole::Admin, UserRole::Viewer);
+    }
+
+    #[test]
+    fn test_check_result_status_equality() {
+        assert_eq!(CheckResultStatus::Ok, CheckResultStatus::Ok);
+        assert_eq!(CheckResultStatus::Warning, CheckResultStatus::Warning);
+        assert_eq!(CheckResultStatus::Critical, CheckResultStatus::Critical);
+        assert_eq!(CheckResultStatus::CheckError, CheckResultStatus::CheckError);
+        assert_eq!(CheckResultStatus::Pending, CheckResultStatus::Pending);
+    }
+
+    #[test]
+    fn test_check_result_status_to_number() {
+        assert_eq!(CheckResultStatus::Ok.to_number(), 0);
+        assert_eq!(CheckResultStatus::Warning.to_number(), 1);
+        assert_eq!(CheckResultStatus::Critical.to_number(), 2);
+        assert_eq!(CheckResultStatus::CheckError.to_number(), 3);
+        assert_eq!(CheckResultStatus::Pending.to_number(), 4);
+    }
+
+    #[test]
+    fn test_check_result_status_from_i32() {
+        assert_eq!(CheckResultStatus::from(0i32), CheckResultStatus::Ok);
+        assert_eq!(CheckResultStatus::from(1i32), CheckResultStatus::Warning);
+        assert_eq!(CheckResultStatus::from(2i32), CheckResultStatus::Critical);
+        assert_eq!(CheckResultStatus::from(3i32), CheckResultStatus::CheckError);
+        assert_eq!(CheckResultStatus::from(4i32), CheckResultStatus::Pending);
+    }
+
+    #[test]
+    fn test_scheduled_check_ordering() {
+        let now = Instant::now();
+        let future = now + std::time::Duration::from_secs(60);
+
+        let check1 = PinglowCheck {
+            passive: true,
+            script: None,
+            interval: Some(300),
+            check_name: "check1".to_string(),
+            secrets: None,
+            telegram_channels: vec![],
+            mute_notifications: None,
+            mute_notifications_until: None,
+        };
+
+        let check2 = PinglowCheck {
+            passive: true,
+            script: None,
+            interval: Some(300),
+            check_name: "check2".to_string(),
+            secrets: None,
+            telegram_channels: vec![],
+            mute_notifications: None,
+            mute_notifications_until: None,
+        };
+
+        let scheduled_now = ScheduledCheck {
+            check: Arc::new(check1),
+            next_run: now,
+        };
+        let scheduled_future = ScheduledCheck {
+            check: Arc::new(check2),
+            next_run: future,
+        };
+
+        assert!(
+            scheduled_future < scheduled_now,
+            "later next_run should be sorted before earlier"
+        );
+    }
+
+    #[test]
+    fn test_scheduled_check_partial_ord() {
+        let now = Instant::now();
+
+        let check1 = PinglowCheck {
+            passive: true,
+            script: None,
+            interval: Some(300),
+            check_name: "check1".to_string(),
+            secrets: None,
+            telegram_channels: vec![],
+            mute_notifications: None,
+            mute_notifications_until: None,
+        };
+
+        let check2 = PinglowCheck {
+            passive: true,
+            script: None,
+            interval: Some(300),
+            check_name: "check2".to_string(),
+            secrets: None,
+            telegram_channels: vec![],
+            mute_notifications: None,
+            mute_notifications_until: None,
+        };
+
+        let scheduled1 = ScheduledCheck {
+            check: Arc::new(check1),
+            next_run: now,
+        };
+        let scheduled2 = ScheduledCheck {
+            check: Arc::new(check2),
+            next_run: now,
+        };
+
+        assert_eq!(scheduled1.partial_cmp(&scheduled2), Some(Ordering::Equal));
+    }
+
+    #[test]
+    fn test_api_key_binding_spec_role() {
+        let binding = ApiKeyBindingSpec {
+            role: UserRole::Operator,
+            secret_name: Some("my-secret".to_string()),
+        };
+        assert_eq!(binding.role, UserRole::Operator);
+        assert_eq!(binding.secret_name, Some("my-secret".to_string()));
+    }
+
+    #[test]
+    fn test_api_key_binding_spec_default_secret_name() {
+        let binding = ApiKeyBindingSpec {
+            role: UserRole::Admin,
+            secret_name: None,
+        };
+        assert_eq!(binding.role, UserRole::Admin);
+        assert_eq!(binding.secret_name, None);
     }
 }
