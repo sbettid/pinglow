@@ -3,8 +3,8 @@
 # Secret containing the DB credentials
 DBEnvFromSecret: "pinglow-db-env"
 
-# Secret containing the api key
-ApiKeyEnvFromSecret: "pinglow-api-key"
+# Secret containing OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET and OIDC_REDIRECT_URL
+OidcEnvFromSecret: "pinglow-oidc"
 
 # Secret containing the redis password
 RedisPasswordSecret: "pinglow-redis-password"
