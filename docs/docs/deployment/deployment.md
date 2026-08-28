@@ -22,5 +22,3 @@ To deploy Pinglow, you can follow these steps:
     - `OidcEnvFromSecret`: optional; when set, the Secret must hold `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, and `OIDC_REDIRECT_URL`. Omit it for API-key-only deployments.
 
     - `RedisPasswordSecret`: which specifies the name of a secret holding a single property named `REDIS_PASSWORD` which represents the password using to authenticate to Redis.
-
-  - Create `ApiKeyBinding` resources for automation clients. Pinglow generates their namespaced Secrets with a role-scoped `API_KEY`; see [API key bindings](../concepts/api-key-bindings.md).
