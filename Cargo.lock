@@ -2531,7 +2531,7 @@ dependencies = [
  "kube",
  "log 0.4.34",
  "pinglow-common",
- "rand 0.8.5",
+ "rand 0.10.1",
  "redis",
  "refinery",
  "reqwest",
