@@ -13,7 +13,7 @@ use kube::{
     Api, Client, Resource, ResourceExt,
 };
 use log::warn;
-use rand::{distributions::Alphanumeric, Rng};
+use rand::{distr::Alphanumeric, RngExt};
 use redis::{AsyncCommands, Client as RedisClient};
 use rocket::{
     get,
@@ -288,7 +288,7 @@ async fn refresh_bindings(config: &PinglowConfig, state: &AuthState) -> Result<(
 }
 
 fn random_value() -> String {
-    rand::thread_rng()
+    rand::rng()
         .sample_iter(&Alphanumeric)
         .take(48)
         .map(char::from)
