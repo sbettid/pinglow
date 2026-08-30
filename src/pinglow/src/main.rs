@@ -101,6 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         event_rx,
         shared_checks.clone(),
         redis_client.clone(),
+        config.redis_stream_max_len,
     ));
 
     // Spawn the task that will process the results

@@ -76,6 +76,7 @@ pub async fn scheduler_loop(
     mut event_rx: mpsc::Receiver<RunnableCheckEvent>,
     shared_checks: SharedPinglowChecks,
     redis_client: RedisClient,
+    redis_stream_max_len: usize,
 ) {
     let mut queue: BTreeMap<Instant, ScheduledCheck> = BTreeMap::new();
 
@@ -126,7 +127,7 @@ pub async fn scheduler_loop(
                     redis_conn.set_response_timeout(Duration::from_secs(30));
 
                     // Send the task in the queue
-                    if let Err(e) = enqueue_check(&mut redis_conn, &scheduled_check.check).await {
+                    if let Err(e) = enqueue_check(&mut redis_conn, &scheduled_check.check, redis_stream_max_len).await {
                         error!("Error sending check to execution queue: {e}")
                     }
 
@@ -147,6 +148,7 @@ pub async fn scheduler_loop(
 pub async fn enqueue_check(
     conn: &mut redis::aio::MultiplexedConnection,
     check: &Arc<PinglowCheck>,
+    redis_stream_max_len: usize,
 ) -> Result<String, Error> {
     let payload = serde_json::to_string(check.as_ref())
         .map_err(|e| SerializeError::SerializationError(format!("Error serializing check: {e}")))?;
@@ -154,6 +156,9 @@ pub async fn enqueue_check(
     // XADD pinglow:tasks * payload "<json>"
     let id: String = redis::cmd("XADD")
         .arg("pinglow:checks")
+        .arg("MAXLEN")
+        .arg("~")
+        .arg(redis_stream_max_len)
         .arg("*")
         .arg("payload")
         .arg(payload)
