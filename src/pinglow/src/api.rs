@@ -491,6 +491,7 @@ pub async fn process_check_result(
 pub async fn schedule_now(
     _user: Operator,
     checks: &State<SharedPinglowChecks>,
+    pinglow_config: &State<PinglowConfig>,
     target_check: &str,
 ) -> Result<(), status::Custom<String>> {
     // Read actual shared checks
@@ -525,12 +526,14 @@ pub async fn schedule_now(
 
     redis_conn.set_response_timeout(Duration::from_secs(30));
 
-    enqueue_check(&mut redis_conn, check).await.map_err(|e| {
-        status::Custom(
-            Status::InternalServerError,
-            format!("Error adding check to run queue: {e}"),
-        )
-    })?;
+    enqueue_check(&mut redis_conn, check, pinglow_config.redis_stream_max_len)
+        .await
+        .map_err(|e| {
+            status::Custom(
+                Status::InternalServerError,
+                format!("Error adding check to run queue: {e}"),
+            )
+        })?;
 
     Ok(())
 }

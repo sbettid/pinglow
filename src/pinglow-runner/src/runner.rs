@@ -49,7 +49,13 @@ pub async fn run() -> anyhow::Result<()> {
         let base_path = runner_config.checks_base_path.clone();
         let connection_config = async_connection.clone();
 
-        match fetch_task(&mut redis_conn, &runner_config.runner_name).await {
+        match fetch_task(
+            &mut redis_conn,
+            &runner_config.runner_name,
+            runner_config.task_claim_idle_ms,
+        )
+        .await
+        {
             Ok(Some((id, check))) => {
                 debug!("Received check to execute");
                 let redis_client = redis_client.clone();
@@ -74,17 +80,6 @@ pub async fn run() -> anyhow::Result<()> {
                         }
                     };
 
-                    // Ack in redis
-                    if let Err(e) = redis::cmd("XACK")
-                        .arg("pinglow:checks")
-                        .arg("workers")
-                        .arg(id)
-                        .query_async::<()>(&mut redis_conn)
-                        .await
-                    {
-                        error!("Error sending ack to redis for check: {e}");
-                    }
-
                     let payload = match serde_json::to_string(&result).map_err(|e| {
                         SerializeError::SerializationError(format!("Error serializing check: {e}"))
                     }) {
@@ -106,6 +101,18 @@ pub async fn run() -> anyhow::Result<()> {
                         .await
                     {
                         error!("Error sending check result to redis: {e}");
+                        return;
+                    }
+
+                    // Ack only after the result is safely in the results stream.
+                    if let Err(e) = redis::cmd("XACK")
+                        .arg("pinglow:checks")
+                        .arg("workers")
+                        .arg(id)
+                        .query_async::<()>(&mut redis_conn)
+                        .await
+                    {
+                        error!("Error sending ack to redis for check: {e}");
                     }
                 });
             }
