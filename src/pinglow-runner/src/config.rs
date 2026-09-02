@@ -6,6 +6,7 @@ pub struct PinglowRunnerConfig {
     pub redis_password: String,
     pub runner_name: String,
     pub checks_base_path: String,
+    pub task_claim_idle_ms: u64,
 }
 
 /**
@@ -17,5 +18,8 @@ pub fn get_config_from_env() -> PinglowRunnerConfig {
         runner_name: env::var("RUNNER_NAME").unwrap_or_else(|_| "runner-unknown".into()),
         checks_base_path: env::var("CHECKS_BASE_PATH")
             .unwrap_or_else(|_| "/home/pinglow-runner/".into()),
+        task_claim_idle_ms: env::var("TASK_CLAIM_IDLE_MS")
+            .map(|value| value.parse().expect("TASK_CLAIM_IDLE_MS must be a number"))
+            .unwrap_or(300000),
     }
 }
