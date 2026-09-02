@@ -45,3 +45,31 @@ runner:
 keda:
   # Enabling this requires KEDA installed in cluster
   enabled: false
+
+# Optional single-instance TimescaleDB deployment. This is intended for
+# development/testing or installations where high availability is not needed.
+# For production HA, use an external or operator-managed database instead.
+# When enabled, Pinglow uses this instance; when disabled, DBEnvFromSecret is used.
+timescaledb:
+  enabled: false
+  image:
+    repository: timescale/timescaledb-ha
+    tag: pg18
+    pullPolicy: IfNotPresent
+  existingSecret: ""
+  username: postgres
+  database: pinglow
+  passwordKey: POSTGRES_PASSWORD
+  persistence:
+    enabled: true
+    storageClassName: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 10Gi
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"

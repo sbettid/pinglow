@@ -1,0 +1,14 @@
+{{- if .Values.timescaledb.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "pinglow.timescaledb.fullname" . }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ include "pinglow.timescaledb.fullname" . }}
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: postgresql
+{{- end }}

@@ -1,0 +1,82 @@
+{{- if .Values.timescaledb.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "pinglow.timescaledb.fullname" . }}
+spec:
+  serviceName: {{ include "pinglow.timescaledb.fullname" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "pinglow.timescaledb.fullname" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "pinglow.timescaledb.fullname" . }}
+    spec:
+      containers:
+        - name: timescaledb
+          image: "{{ .Values.timescaledb.image.repository }}:{{ .Values.timescaledb.image.tag }}"
+          imagePullPolicy: {{ .Values.timescaledb.image.pullPolicy }}
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pinglow.timescaledb.secretName" . }}
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pinglow.timescaledb.secretName" . }}
+                  key: {{ .Values.timescaledb.passwordKey }}
+            - name: POSTGRES_DB
+              value: {{ .Values.timescaledb.database | quote }}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgresql
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.timescaledb.username | quote }}
+                - -d
+                - {{ .Values.timescaledb.database | quote }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - {{ .Values.timescaledb.username | quote }}
+                - -d
+                - {{ .Values.timescaledb.database | quote }}
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.timescaledb.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  {{- if .Values.timescaledb.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          {{- toYaml .Values.timescaledb.persistence.accessModes | nindent 10 }}
+        {{- with .Values.timescaledb.persistence.storageClassName }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.timescaledb.persistence.size }}
+  {{- else }}
+      volumes:
+        - name: data
+          emptyDir: {}
+  {{- end }}
+{{- end }}

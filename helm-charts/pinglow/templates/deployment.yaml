@@ -21,10 +21,40 @@ spec:
                 name: {{ .Values.OidcEnvFromSecret }}
                 optional: true
             - secretRef:
-                name: {{ .Values.DBEnvFromSecret }}
-            - secretRef:
                 name: {{ .Values.RedisPasswordSecret }}
           env: 
+             {{- if .Values.timescaledb.enabled }}
+             - name: DB
+               value: {{ .Values.timescaledb.database | quote }}
+             - name: DB_HOST
+               value: {{ include "pinglow.timescaledb.fullname" . | quote }}
+             - name: DB_USER
+               valueFrom:
+                 secretKeyRef:
+                   name: {{ include "pinglow.timescaledb.secretName" . }}
+                   key: POSTGRES_USER
+             - name: DB_USER_PASSWORD
+               valueFrom:
+                 secretKeyRef:
+                   name: {{ include "pinglow.timescaledb.secretName" . }}
+                   key: {{ .Values.timescaledb.passwordKey }}
+             {{- else }}
+             - name: DB_HOST
+               valueFrom:
+                 secretKeyRef:
+                   name: {{ .Values.DBEnvFromSecret }}
+                   key: DB_HOST
+             - name: DB_USER
+               valueFrom:
+                 secretKeyRef:
+                   name: {{ .Values.DBEnvFromSecret }}
+                   key: DB_USER
+             - name: DB_USER_PASSWORD
+               valueFrom:
+                 secretKeyRef:
+                   name: {{ .Values.DBEnvFromSecret }}
+                   key: DB_USER_PASSWORD
+             {{- end }}
              - name: REDIS_HOST
                value: "redis"
           ports:

@@ -4,8 +4,6 @@ description: A Helm chart for Pinglow
 
 type: application
 
-
 version: 0.11.0
-
 
 appVersion: "v0.11.0"

@@ -228,12 +228,49 @@ jobs:
 
     permissions:
       contents: write
+      packages: write
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set release versions
+        run: |
+          export VERSION="${GITHUB_REF_NAME#v}"
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          cargo = Path("Cargo.toml")
+          cargo.write_text(re.sub(r'(?m)^version = "[^"]+"$', f'version = "{version}"', cargo.read_text(), count=1))
+
+          chart = Path("helm-charts/pinglow/Chart.yaml")
+          text = chart.read_text()
+          text = re.sub(r'(?m)^version: .+$', f'version: {version}', text, count=1)
+          text = re.sub(r'(?m)^appVersion: ".+"$', f'appVersion: "v{version}"', text, count=1)
+          chart.write_text(text)
+          PY
+
+      - name: Package Helm chart
+        run: |
+          helm dependency update helm-charts/pinglow
+          helm lint helm-charts/pinglow
+          mkdir -p chart-packages
+          helm package helm-charts/pinglow --destination chart-packages
+
+      - name: Upload Helm chart artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: helm-chart
+          path: chart-packages/pinglow-*.tgz
+
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
+            chart-packages/pinglow-*.tgz \
             --generate-notes

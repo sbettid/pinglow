@@ -7,9 +7,23 @@ sidebar_position: 2
 To deploy Pinglow, you can follow these steps: 
 
 - Create a dedicated namespace in your Kubernetes cluster
-- Deploy timescaledb. For this the [official documentation](https://docs.tigerdata.com/self-hosted/latest/install/installation-kubernetes/)
-  can be followed. 
-- Deploy the helm charts contained in this repo either throuh ArgoCD or through manual installation after cloning the repository
+- Deploy the Helm chart contained in this repo either through ArgoCD or through a
+  manual installation after cloning the repository. By default, configure
+  `DBEnvFromSecret` with an externally managed TimescaleDB secret. To deploy the
+  database with Pinglow instead, set `timescaledb.enabled=true`; the chart then
+  creates the TimescaleDB StatefulSet, Service, PVC, and credentials Secret and
+  configures Pinglow to use it. The generated password is retained across Helm
+  upgrades. To provide credentials yourself, set `timescaledb.existingSecret`;
+  that Secret must contain `POSTGRES_USER` and `POSTGRES_PASSWORD`.
+
+  The bundled database is a single-instance deployment intended for
+  development/testing or installations where high availability is not needed.
+  For production high availability, use an external or operator-managed
+  TimescaleDB deployment and keep `timescaledb.enabled=false`.
+
+  For an externally managed database, the [official TimescaleDB Kubernetes
+  documentation](https://docs.tigerdata.com/self-hosted/latest/install/installation-kubernetes/)
+  can be followed.
     
 - Adapt the `values.yaml` file to specify the references to the secrets needed for the deployment
      
