@@ -18,10 +18,10 @@ spec:
           image: "ghcr.io/sbettid/{{ .Release.Name }}:{{ .Chart.AppVersion }}"
           envFrom:
             - secretRef:
-                name: {{ .Values.OidcEnvFromSecret }}
+                name: {{ .Values.pinglow.OidcEnvFromSecret }}
                 optional: true
             - secretRef:
-                name: {{ .Values.RedisPasswordSecret }}
+                name: {{ include "pinglow.redis.secretName" . }}
           env: 
              {{- if .Values.timescaledb.enabled }}
              - name: DB
@@ -42,17 +42,17 @@ spec:
              - name: DB_HOST
                valueFrom:
                  secretKeyRef:
-                   name: {{ .Values.DBEnvFromSecret }}
+                   name: {{ include "pinglow.db.secretName" . }}
                    key: DB_HOST
              - name: DB_USER
                valueFrom:
                  secretKeyRef:
-                   name: {{ .Values.DBEnvFromSecret }}
+                   name: {{ include "pinglow.db.secretName" . }}
                    key: DB_USER
              - name: DB_USER_PASSWORD
                valueFrom:
                  secretKeyRef:
-                   name: {{ .Values.DBEnvFromSecret }}
+                   name: {{ include "pinglow.db.secretName" . }}
                    key: DB_USER_PASSWORD
              {{- end }}
              - name: REDIS_HOST

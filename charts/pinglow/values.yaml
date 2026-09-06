@@ -1,16 +1,14 @@
-# Default values for pinglow.
+# Default values for pinglow helm chart.
 
-# Secret containing the DB credentials
-DBEnvFromSecret: "pinglow-db-env"
-
-# Secret containing OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET and OIDC_REDIRECT_URL
-OidcEnvFromSecret: "pinglow-oidc"
-
-# Secret containing the redis password
-RedisPasswordSecret: "pinglow-redis-password"
+redis:
+  # Empty generates and uses automatically a Secret named pinglow-redis-password.
+  secretName: ""
 
 # Pinglow controller configuration
 pinglow:
+  db:
+    secretName: "pinglow-db-credentials"
+  OidcEnvFromSecret: "pinglow-oidc"
   resources:
     requests:
       cpu: "250m"
@@ -49,14 +47,16 @@ keda:
 # Optional single-instance TimescaleDB deployment. This is intended for
 # development/testing or installations where high availability is not needed.
 # For production HA, use an external or operator-managed database instead.
-# When enabled, Pinglow uses this instance; when disabled, DBEnvFromSecret is used.
+# Note that in case this instance of timescadb is used and 
+# a custom secret is used, the key must be updated also in the pinglow values above.
 timescaledb:
   enabled: false
   image:
     repository: timescale/timescaledb-ha
     tag: pg18
     pullPolicy: IfNotPresent
-  existingSecret: ""
+  # Empty generates and uses automatically a Secret named pinglow-db-credentials.
+  secretName: ""
   username: postgres
   database: pinglow
   passwordKey: POSTGRES_PASSWORD

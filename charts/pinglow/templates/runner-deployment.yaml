@@ -25,7 +25,7 @@ spec:
               readOnly: false
           envFrom:
             - secretRef:
-                name: {{ .Values.RedisPasswordSecret }}
+                name: {{ include "pinglow.redis.secretName" . }}
           env: 
             - name: REDIS_HOST
               value: "redis"

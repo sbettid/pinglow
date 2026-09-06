@@ -246,7 +246,7 @@ jobs:
           cargo = Path("Cargo.toml")
           cargo.write_text(re.sub(r'(?m)^version = "[^"]+"$', f'version = "{version}"', cargo.read_text(), count=1))
 
-          chart = Path("helm-charts/pinglow/Chart.yaml")
+          chart = Path("charts/pinglow/Chart.yaml")
           text = chart.read_text()
           text = re.sub(r'(?m)^version: .+$', f'version: {version}', text, count=1)
           text = re.sub(r'(?m)^appVersion: ".+"$', f'appVersion: "v{version}"', text, count=1)
@@ -255,10 +255,10 @@ jobs:
 
       - name: Package Helm chart
         run: |
-          helm dependency update helm-charts/pinglow
-          helm lint helm-charts/pinglow
+          helm dependency update charts/pinglow
+          helm lint charts/pinglow
           mkdir -p chart-packages
-          helm package helm-charts/pinglow --destination chart-packages
+          helm package charts/pinglow --destination chart-packages
 
       - name: Upload Helm chart artifact
         uses: actions/upload-artifact@v7
