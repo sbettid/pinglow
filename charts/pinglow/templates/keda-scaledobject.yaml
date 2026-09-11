@@ -32,7 +32,7 @@ spec:
     - type: redis-streams
       metadata:
         # Redis connection
-        address: redis.pinglow.svc.cluster.local:6379
+        address: redis.{{ .Release.Namespace }}.svc.cluster.local:6379
         stream: pinglow:checks
         consumerGroup: workers
         # Pending messages threshold
@@ -50,6 +50,6 @@ metadata:
 spec:
   secretTargetRef:
     - parameter: password
-      name: {{ .Values.RedisPasswordSecret }}
+      name: {{ include "pinglow.redis.secretName" . }}
       key: REDIS_PASSWORD
 {{- end }}

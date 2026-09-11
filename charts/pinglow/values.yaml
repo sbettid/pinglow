@@ -1,0 +1,75 @@
+# Default values for pinglow helm chart.
+
+redis:
+  # Empty generates and uses automatically a Secret named pinglow-redis-password.
+  secretName: ""
+
+# Pinglow controller configuration
+pinglow:
+  db:
+    secretName: "pinglow-db-credentials"
+  OidcEnvFromSecret: "pinglow-oidc"
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+# Runner configuration
+runner:
+  minReplicas: 1
+  maxReplicas: 10
+  # Queue length threshold for scaling
+  queueLengthThreshold: 10
+  # Minimum queue length to activate scaling
+  activationThreshold: 1
+  # How often KEDA checks metrics (seconds)
+  pollingInterval: 15
+  # Wait time before scaling down (seconds)
+  cooldownPeriod: 300
+  
+  # Resource limits
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"
+      memory: "512Mi"
+
+# KEDA configuration
+keda:
+  # Enabling this requires KEDA installed in cluster
+  enabled: false
+
+# Optional single-instance TimescaleDB deployment. This is intended for
+# development/testing or installations where high availability is not needed.
+# For production HA, use an external or operator-managed database instead.
+# Note that in case this instance of timescadb is used and 
+# a custom secret is used, the key must be updated also in the pinglow values above.
+timescaledb:
+  enabled: false
+  image:
+    repository: timescale/timescaledb-ha
+    tag: pg18
+    pullPolicy: IfNotPresent
+  # Empty generates and uses automatically a Secret named pinglow-db-credentials.
+  secretName: ""
+  username: postgres
+  database: pinglow
+  passwordKey: POSTGRES_PASSWORD
+  persistence:
+    enabled: true
+    storageClassName: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 10Gi
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"

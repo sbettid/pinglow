@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ .Release.Name }}
+      containers:
+        - name: {{ .Release.Name }}
+          image: "ghcr.io/sbettid/{{ .Release.Name }}:{{ .Chart.AppVersion }}"
+          envFrom:
+            - secretRef:
+                name: {{ .Values.pinglow.OidcEnvFromSecret }}
+                optional: true
+            - secretRef:
+                name: {{ include "pinglow.redis.secretName" . }}
+          env: 
+             {{- if .Values.timescaledb.enabled }}
+             - name: DB
+               value: {{ .Values.timescaledb.database | quote }}
+             - name: DB_HOST
+               value: {{ include "pinglow.timescaledb.fullname" . | quote }}
+             - name: DB_USER
+               valueFrom:
+                 secretKeyRef:
+                   name: {{ include "pinglow.timescaledb.secretName" . }}
+                   key: POSTGRES_USER
+             - name: DB_USER_PASSWORD
+               valueFrom:
+                 secretKeyRef:
+                   name: {{ include "pinglow.timescaledb.secretName" . }}
+                   key: {{ .Values.timescaledb.passwordKey }}
+             {{- else }}
+             - name: DB_HOST
+               valueFrom:
+                 secretKeyRef:
+                   name: {{ include "pinglow.db.secretName" . }}
+                   key: DB_HOST
+             - name: DB_USER
+               valueFrom:
+                 secretKeyRef:
+                   name: {{ include "pinglow.db.secretName" . }}
+                   key: DB_USER
+             - name: DB_USER_PASSWORD
+               valueFrom:
+                 secretKeyRef:
+                   name: {{ include "pinglow.db.secretName" . }}
+                   key: DB_USER_PASSWORD
+             {{- end }}
+             - name: REDIS_HOST
+               value: "redis"
+          ports:
+            - containerPort: 8000
+          resources:
+            {{- toYaml .Values.pinglow.resources | nindent 12 }}
+      imagePullSecrets:
+        - name: pinglow-pull
