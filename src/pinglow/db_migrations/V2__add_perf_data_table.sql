@@ -7,4 +7,3 @@ CREATE TABLE IF NOT EXISTS "check_result_perf_data" (
 );
 SELECT create_hypertable('check_result_perf_data', 'timestamp', if_not_exists => TRUE);
 ALTER TABLE "check_result_perf_data" SET (timescaledb.compress, timescaledb.compress_orderby = 'timestamp DESC');
-SELECT add_retention_policy('check_result_perf_data', INTERVAL '7 days');

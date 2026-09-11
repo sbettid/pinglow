@@ -9,6 +9,8 @@ pub struct PinglowConfig {
     pub db_user_password: String,
     pub redis_password: String,
     pub redis_stream_max_len: usize,
+    pub db_retention_check_results: String,
+    pub db_retention_perf_data: String,
     pub oidc: Option<OidcConfig>,
     pub oidc_cookie_secure: bool,
 }
@@ -36,6 +38,8 @@ pub fn get_config_from_env() -> PinglowConfig {
         redis_stream_max_len: env::var("REDIS_STREAM_MAX_LEN")
             .map(|value| value.parse::<usize>().expect("REDIS_STREAM_MAX_LEN must be a number"))
             .unwrap_or(100000),
+        db_retention_check_results: env::var("DB_RETENTION_CHECK_RESULTS").unwrap_or("7 days".to_string()),
+        db_retention_perf_data: env::var("DB_RETENTION_PERF_DATA").unwrap_or("7 days".to_string()),
         oidc: match (env::var("OIDC_ISSUER_URL"), env::var("OIDC_CLIENT_ID"), env::var("OIDC_CLIENT_SECRET"), env::var("OIDC_REDIRECT_URL")) {
             (Ok(issuer), Ok(client_id), Ok(client_secret), Ok(redirect_url)) => Some(OidcConfig { issuer, client_id, client_secret, redirect_url }),
             (Err(_), Err(_), Err(_), Err(_)) => None,

@@ -24,6 +24,7 @@ use pinglow::scheduler::RunnableCheckEvent;
 use pinglow::{
     check::SharedChecks,
     config::{get_config_from_env, PinglowConfig},
+    db::apply_retention_policies,
     error::ReconcileError,
     scheduler::scheduler_loop,
 };
@@ -66,6 +67,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     embedded::migrations::runner()
         .run_async(&mut postgres_client)
         .await?;
+
+    // Apply retention policies based on configuration
+    apply_retention_policies(&postgres_client, &config).await?;
 
     let postgres_client_arc = Arc::new(postgres_client);
 
