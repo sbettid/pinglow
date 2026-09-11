@@ -8,6 +8,10 @@ redis:
 pinglow:
   db:
     secretName: "pinglow-db-credentials"
+  # TimescaleDB retention policies for hypertables
+  # These can be any valid PostgreSQL INTERVAL value
+  dbRetentionCheckResults: "7 days"
+  dbRetentionPerfData: "7 days"
   OidcEnvFromSecret: "pinglow-oidc"
   resources:
     requests:

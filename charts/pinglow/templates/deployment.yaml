@@ -57,6 +57,10 @@ spec:
              {{- end }}
              - name: REDIS_HOST
                value: "redis"
+             - name: DB_RETENTION_CHECK_RESULTS
+               value: {{ .Values.pinglow.dbRetentionCheckResults | quote }}
+             - name: DB_RETENTION_PERF_DATA
+               value: {{ .Values.pinglow.dbRetentionPerfData | quote }}
           ports:
             - containerPort: 8000
           resources:

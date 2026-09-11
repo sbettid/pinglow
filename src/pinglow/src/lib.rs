@@ -24,6 +24,7 @@ pub mod auth;
 pub mod check;
 pub mod config;
 pub mod controller;
+pub mod db;
 pub mod error;
 pub mod results;
 pub mod scheduler;
