@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.27
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 ARG TARGETARCH
 ARG BINARY_NAME
