@@ -61,9 +61,27 @@ spec:
                value: {{ .Values.pinglow.dbRetentionCheckResults | quote }}
              - name: DB_RETENTION_PERF_DATA
                value: {{ .Values.pinglow.dbRetentionPerfData | quote }}
+             {{- if .Values.pinglow.extraCASecretName }}
+             - name: OIDC_EXTRA_CA_CERT_PATH
+               value: /custom-ca/ca.crt
+             {{- end }}
+          {{- if .Values.pinglow.extraCASecretName }}
+          volumeMounts:
+            - name: custom-ca
+              mountPath: /custom-ca
+          {{- end }}
           ports:
             - containerPort: 8000
           resources:
             {{- toYaml .Values.pinglow.resources | nindent 12 }}
+      {{- if .Values.pinglow.extraCASecretName }}
+      volumes:
+        - name: custom-ca
+          configMap:
+            name: {{ .Values.pinglow.extraCASecretName }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+      {{- end }}
       imagePullSecrets:
         - name: pinglow-pull
