@@ -6,6 +6,9 @@
     "security:openssf-scorecard",
     ":disableDependencyDashboard"
   ],
+  "labels": [
+    "dependencies"
+  ],
   "reviewers": [
     "sbettid"
   ],

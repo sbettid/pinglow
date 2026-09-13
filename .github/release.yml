@@ -9,8 +9,8 @@ changelog:
         - bug
 
     - title: 📦 Dependencies
-      authors:
-        - renovate[bot]
+      labels:
+        - dependencies
 
     - title: 📝 Documentation
       labels:
