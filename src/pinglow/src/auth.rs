@@ -46,6 +46,7 @@ pub struct AuthState {
     api_keys: ApiKeyCache,
     pub oidc: Option<OidcConfig>,
     pub cookie_secure: bool,
+    http_client: reqwest::Client,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,15 +79,37 @@ pub async fn create_auth_state(
     config: &PinglowConfig,
     redis: RedisClient,
 ) -> Result<Arc<AuthState>, Box<dyn std::error::Error + Send + Sync>> {
+    let http_client = build_oidc_http_client(config.oidc.as_ref())?;
     let state = Arc::new(AuthState {
         redis,
         bindings: Arc::new(RwLock::new(HashMap::new())),
         api_keys: Arc::new(RwLock::new(HashMap::new())),
         oidc: config.oidc.clone(),
         cookie_secure: config.oidc_cookie_secure,
+        http_client,
     });
     refresh_bindings(config, &state).await?;
     Ok(state)
+}
+
+/// Builds the HTTP client used for OIDC provider calls. If
+/// `oidc.extra_ca_cert_path` is set, the referenced PEM file is added as an
+/// additional trusted root on top of the system's default CA bundle -
+/// existing public-CA-issued endpoints keep working unchanged.
+fn build_oidc_http_client(
+    oidc: Option<&OidcConfig>,
+) -> Result<reqwest::Client, Box<dyn std::error::Error + Send + Sync>> {
+    let mut builder = reqwest::Client::builder();
+    if let Some(path) = oidc.and_then(|oidc| oidc.extra_ca_cert_path.as_ref()) {
+        let pem = std::fs::read(path)
+            .map_err(|e| format!("failed to read OIDC_EXTRA_CA_CERT_PATH '{path}': {e}"))?;
+        let cert = reqwest::Certificate::from_pem(&pem)
+            .map_err(|e| format!("failed to parse OIDC_EXTRA_CA_CERT_PATH '{path}' as PEM: {e}"))?;
+        // Merges with the platform's native/built-in roots rather than
+        // replacing them, so public-CA-issued endpoints keep working too.
+        builder = builder.tls_certs_merge([cert]);
+    }
+    Ok(builder.build()?)
 }
 
 #[derive(Clone)]
@@ -448,7 +471,8 @@ pub async fn callback(
     let discovery = discover(auth_state.inner())
         .await
         .map_err(|_| Status::ServiceUnavailable)?;
-    let token: TokenResponse = reqwest::Client::new()
+    let token: TokenResponse = auth_state
+        .http_client
         .post(&discovery.token_endpoint)
         .form(&[
             ("grant_type", "authorization_code"),
@@ -515,14 +539,17 @@ async fn discover(
     state: &AuthState,
 ) -> Result<Discovery, Box<dyn std::error::Error + Send + Sync>> {
     let oidc = state.oidc.as_ref().ok_or("OIDC is disabled")?;
-    Ok(reqwest::get(format!(
-        "{}/.well-known/openid-configuration",
-        oidc.issuer.trim_end_matches('/')
-    ))
-    .await?
-    .error_for_status()?
-    .json()
-    .await?)
+    Ok(state
+        .http_client
+        .get(format!(
+            "{}/.well-known/openid-configuration",
+            oidc.issuer.trim_end_matches('/')
+        ))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?)
 }
 
 async fn verify_id_token(
@@ -532,7 +559,13 @@ async fn verify_id_token(
     nonce: &str,
 ) -> Result<Claims, Box<dyn std::error::Error + Send + Sync>> {
     let header = decode_header(token)?;
-    let key_set: Value = reqwest::get(&discovery.jwks_uri).await?.json().await?;
+    let key_set: Value = state
+        .http_client
+        .get(&discovery.jwks_uri)
+        .send()
+        .await?
+        .json()
+        .await?;
     let key = key_set["keys"]
         .as_array()
         .and_then(|keys| {

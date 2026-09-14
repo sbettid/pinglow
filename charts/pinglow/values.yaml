@@ -13,6 +13,7 @@ pinglow:
   dbRetentionCheckResults: "7 days"
   dbRetentionPerfData: "7 days"
   OidcEnvFromSecret: "pinglow-oidc"
+  extraCASecretName: ""
   resources:
     requests:
       cpu: "250m"
