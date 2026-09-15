@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    auth::{self, Authenticated, Operator, OperatorApiKey},
+    auth::{self, Authenticated, Operator},
     check::{Check, SharedPinglowChecks},
     config::PinglowConfig,
     scheduler::enqueue_check,
@@ -427,7 +427,7 @@ pub struct ProcessCheckResultPayload {
 )]
 #[post("/check/<target_check>/result", data = "<check_result_payload>")]
 pub async fn process_check_result(
-    _key: OperatorApiKey,
+    _user: Operator,
     checks: &State<SharedPinglowChecks>,
     client: &State<Arc<Client>>,
     target_check: &str,
