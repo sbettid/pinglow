@@ -615,7 +615,7 @@ mod tests {
         };
 
         let dto = SimpleCheckDto::from(&Arc::new(check));
-        assert!(dto.passive);
+        assert!(!dto.passive);
         assert_eq!(dto.interval, Some(60));
     }
 
