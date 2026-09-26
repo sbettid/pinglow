@@ -15,7 +15,7 @@ license = "MIT"
 repository = "https://github.com/sbettid/pinglow"
 
 [workspace.dependencies]
-utoipa = {version = "5", features = ["chrono"]}
+utoipa = {version = "6", features = ["chrono"]}
 serde = { version = "1.0", features = ["derive", "rc"] }
 schemars = {version = "1", features = ["chrono04"]}
 chrono = {version = "0.4", features = ["serde"]}
