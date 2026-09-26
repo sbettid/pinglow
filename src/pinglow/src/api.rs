@@ -570,7 +570,8 @@ impl Modify for SecurityAddon {
                 "api_key".to_string(),
                 SecurityScheme::ApiKey(utoipa::openapi::security::ApiKey::Header(
                     ApiKeyValue::new("x-api-key"),
-                )),
+                ))
+                .into(),
             );
         }
     }
@@ -596,7 +597,7 @@ mod tests {
 
         let dto = SimpleCheckDto::from(&Arc::new(check));
         assert_eq!(dto.check_name, "test-check");
-        assert_eq!(dto.passive, true);
+        assert!(dto.passive);
         assert_eq!(dto.interval, Some(300));
     }
 
@@ -614,7 +615,7 @@ mod tests {
         };
 
         let dto = SimpleCheckDto::from(&Arc::new(check));
-        assert_eq!(dto.passive, false);
+        assert!(dto.passive);
         assert_eq!(dto.interval, Some(60));
     }
 
