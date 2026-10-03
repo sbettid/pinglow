@@ -45,7 +45,7 @@ thiserror.workspace = true
 env_logger.workspace = true
 
 futures = "0.3"
-refinery = {version = "0.9", features = ["tokio-postgres"]}
+refinery = {version = "0.10", features = ["tokio-postgres"]}
 rocket = { version = "0.5", features = ["json"] }
 reqwest = { version = "0.13", default-features = false, features = ["form", "json", "native-tls-vendored", "http2", "charset", "multipart"] }
 
