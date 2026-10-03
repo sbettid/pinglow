@@ -4,8 +4,7 @@ sidebar_position: 5
 
 # OIDC authentication and user roles
 
-To activate also OIDC authentication for browser logins, please ensure the associated 
-environment variables have been set during the [deployment](/docs/deployment/).
+To enable OIDC authentication for browser logins, first configure the provider, Secret and Helm values as described in [OIDC authentication](/docs/deployment/oidc).
 
 User bindings connect OIDC identities to Pinglow roles, enabling browser-based authentication with declarative role assignment.
 
@@ -36,7 +35,7 @@ At least one of `email` or `subject` must be specified.
 
 ## OIDC provider integration
 
-The binding's `email` and `subject` fields are matched against claims in the OIDC ID token returned during browser login. Pinglow checks both fields in order and grants the role of the first match.
+The binding's `email` and `subject` fields are matched against claims in the OIDC ID token returned during browser login. Pinglow checks the `sub` claim first, then the `email` claim, and grants the role of the first match.
 
 If no binding matches the authenticated user, the login is rejected with a `403 Forbidden` response.
 

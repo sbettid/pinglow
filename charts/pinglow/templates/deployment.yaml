@@ -83,5 +83,3 @@ spec:
               - key: ca.crt
                 path: ca.crt
       {{- end }}
-      imagePullSecrets:
-        - name: pinglow-pull

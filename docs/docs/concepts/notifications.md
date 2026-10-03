@@ -20,7 +20,7 @@ spec:
   botTokenRef: "main-channel-token"
 ```
 
-For more definition about the specific properties please see the [CRDs definition](https://github.com/sbettid/pinglow/blob/main/helm-charts/pinglow/templates/custom-rd.yaml).
+For more details about the specific properties please see the [CRDs definition](https://github.com/sbettid/pinglow/blob/main/charts/pinglow/crds/check-script.yaml).
 
 Once a `TelegramChannel` is defined, we can associate it to a `Check` as follows: 
 
