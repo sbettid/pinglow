@@ -1,41 +1,113 @@
 ---
-sidebar_position: 2
+sidebar_position: 3
 ---
 
 # Deployment
 
-To deploy Pinglow, you can follow these steps: 
+This page describes a regular installation of Pinglow with the Helm chart. If you just want to try it out, the [quick start](/docs/deployment/quick-start) is faster.
 
-- Create a dedicated namespace in your Kubernetes cluster
-- Deploy the Helm chart contained in this repo either through ArgoCD or through a
-  manual installation after cloning the repository. By default, configure
-  `DBEnvFromSecret` with an externally managed TimescaleDB secret. To deploy the
-  database with Pinglow instead, set `timescaledb.enabled=true`; the chart then
-  creates the TimescaleDB StatefulSet, Service, PVC, and credentials Secret and
-  configures Pinglow to use it. The generated password is retained across Helm
-  upgrades. To provide credentials yourself, set `timescaledb.existingSecret`;
-  that Secret must contain `POSTGRES_USER` and `POSTGRES_PASSWORD`.
+## 1. Prepare the namespace
 
-  The bundled database is a single-instance deployment intended for
-  development/testing or installations where high availability is not needed.
-  For production high availability, use an external or operator-managed
-  TimescaleDB deployment and keep `timescaledb.enabled=false`.
+Pinglow watches the custom resources (`Check`, `Script`, ...) of the namespace it is installed in, so create a dedicated one and keep all your Pinglow resources there:
 
-  For an externally managed database, the [official TimescaleDB Kubernetes
-  documentation](https://docs.tigerdata.com/self-hosted/latest/install/installation-kubernetes/)
-  can be followed.
-    
-- Adapt the `values.yaml` file to specify the references to the secrets needed for the deployment
-     
-    - `DBEnvFromSecret`: which should specify the name of a secret holding the following properties
+```bash
+kubectl create namespace pinglow
+```
 
-        - `DB_HOST`: hostname of you timescaledb instance
-        - `DB_USER`: username of an user in timescaledb with the privileged to manage a dedicated DB (by default named `pinglow`)
-        - `DB_USER_PASSWORD`: password of the aforementioned user
+## 2. Provide the database
 
-    - `OidcEnvFromSecret`: optional; when set, the Secret must hold `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, and `OIDC_REDIRECT_URL`. Omit it for API-key-only deployments.
+Pinglow needs a TimescaleDB instance (see the [requirements](/docs/deployment/requirements)). You have two options.
 
-    - `RedisPasswordSecret`: which specifies the name of a secret holding a single property named `REDIS_PASSWORD` which represents the password using to authenticate to Redis.
+### Option A: externally managed database (recommended for production)
+
+Create a Secret, named `pinglow-db-credentials` by default, with the connection details:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pinglow-db-credentials
+  namespace: pinglow
+type: Opaque
+stringData:
+  DB_HOST: timescaledb.database.svc.cluster.local
+  DB_USER: pinglow
+  DB_USER_PASSWORD: change-me
+```
+
+| Key | Description |
+| --- | --- |
+| `DB_HOST` | Hostname of your TimescaleDB instance. |
+| `DB_USER` | User with the privileges to manage a dedicated database (named `pinglow` by default). |
+| `DB_USER_PASSWORD` | Password of that user. |
+
+If you use a different Secret name, set it in the values:
+
+```yaml
+pinglow:
+  db:
+    secretName: "my-db-secret"
+```
+
+For installing TimescaleDB on Kubernetes, see the [official documentation](https://docs.tigerdata.com/self-hosted/latest/install/installation-kubernetes/).
+
+### Option B: database bundled with the chart (development and testing)
+
+```yaml
+timescaledb:
+  enabled: true
+```
+
+The chart then creates the TimescaleDB StatefulSet, Service, PVC and a credentials Secret, and configures Pinglow to use it. The generated password is kept across Helm upgrades.
+
+To provide the credentials yourself, set `timescaledb.secretName`; that Secret must contain `POSTGRES_USER` and `POSTGRES_PASSWORD`.
+
+:::caution
+The bundled database is a single instance, intended for development/testing or installations that do not need high availability. For production use an external or operator-managed TimescaleDB and keep `timescaledb.enabled=false`.
+:::
+
+## 3. Redis
+
+Redis is deployed by the chart. By default the chart generates a password in a Secret named `pinglow-redis-password`. To use your own, create a Secret holding a single key `REDIS_PASSWORD` and reference it:
+
+```yaml
+redis:
+  secretName: "my-redis-secret"
+```
+
+## 4. OIDC (optional)
+
+To let users log in from the browser through an OIDC provider, create the OIDC Secret as described in [OIDC authentication](/docs/deployment/oidc). Without it, Pinglow can still be used through [API keys](/docs/concepts/automation-credentials).
+
+## 5. Install the chart
+
+The chart is part of the repository, and a packaged version is attached to every [GitHub release](https://github.com/sbettid/pinglow/releases). Install it from a clone of the repository:
+
+```bash
+helm install pinglow ./charts/pinglow \
+  --namespace pinglow \
+  --values my-values.yaml
+```
+
+:::important
+Keep the release name `pinglow`. The container images (`ghcr.io/sbettid/<release name>`), the service account and the role are all derived from, or hardcoded to, this name.
+:::
+
+Alternatively the chart can be deployed with ArgoCD, pointing it to the `charts/pinglow` path of the repository.
+
+All the available options are listed in the [Helm values reference](/docs/deployment/values).
+
+## Upgrading
+
+```bash
+helm upgrade pinglow ./charts/pinglow --namespace pinglow --values my-values.yaml
+```
+
+Helm installs the CRDs contained in the chart's `crds/` directory on the first install, but does not update them on upgrade. After pulling a new version, apply them manually:
+
+```bash
+kubectl apply -f charts/pinglow/crds/
+```
 
 ## Data Retention Configuration
 

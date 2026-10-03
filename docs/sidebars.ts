@@ -13,7 +13,10 @@ const sidebars: SidebarsConfig = {
       label: 'Deployment',
       items: [
         'deployment/requirements',
-        'deployment/deployment'
+        'deployment/quick-start',
+        'deployment/deployment',
+        'deployment/oidc',
+        'deployment/values'
       ],
     },
     {

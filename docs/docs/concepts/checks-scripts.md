@@ -4,7 +4,7 @@ sidebar_position: 1
 
 # Checks and scripts
 
-The basic idea is that monitoring is performed through `Checks` which execute a specific `Script` (only Python is supported for now) as a Kubernetes job. 
+The basic idea is that monitoring is performed through `Checks` which execute a specific `Script` (only Python is supported for now) inside a Pinglow runner. 
 
 `Check` statuses are defined by the following elements: 
 
@@ -32,7 +32,7 @@ spec:
     - my-service-definition
 ```
 
-As we can see, the `Check` references a standard secret and so its keys and values will be automatically passed as environment variables in the Kubernetes job used to run the script.
+As we can see, the `Check` references a standard secret and so its keys and values will be automatically passed as environment variables to the script when it runs.
 
 ```yaml
 apiVersion: pinglow.io/v1alpha1
@@ -58,6 +58,8 @@ spec:
       sys.exit(2)
 ```
 
+The exit code of the script is used as the check result: exiting with `2`, as above, marks the check as critical, while a script that exits normally (`0`) is reported as okay.
+
 ## Performance data
 
 When writing a script, it is possible to print not only the general output, but also some performance data that will be stripped out from the output
@@ -82,7 +84,7 @@ spec:
     print(f"Your temperature and humidity are OK!|temperature={temperature},humidity={humidity}")
 ```
 
-# Passive checks
+## Passive checks
 
 Sometimes, we do not want an active action from a check but instead we would like an external system to send the results of a certain operation
 to our system. For this reason, it is possible to define a `Check` as `passive`. 

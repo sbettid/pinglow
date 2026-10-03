@@ -39,7 +39,13 @@ Send the key as the `x-api-key` header on all requests:
 
 ```bash
 curl -H "x-api-key: <your-api-key>" \
-  http://pinglow:8000/checks
+  http://pinglow/checks
+```
+
+From inside the cluster the API is reachable through the `pinglow` Service, which exposes port 80. From your workstation you can use a port-forward and then call `http://localhost:8000/checks`:
+
+```bash
+kubectl port-forward -n pinglow svc/pinglow 8000:80
 ```
 
 ## Fields
