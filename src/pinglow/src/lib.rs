@@ -93,7 +93,7 @@ pub async fn load_single_runnable_check(
     // Check if we have secrets
     let secrets = if let Some(secrets_refs) = &check.spec.secretRefs {
         Some(
-            fetch_secrets(&config.target_namespace, secrets_refs)
+            fetch_secrets(client, &config.target_namespace, secrets_refs)
                 .await
                 .map_err(|e| {
                     ReconcileError::GeneralError(format!("Error fetching secrets: {e}"))
@@ -119,22 +119,21 @@ pub async fn load_single_runnable_check(
 }
 
 async fn fetch_secrets(
+    client: &Client,
     namespace: &str,
     secret_names: &[String],
 ) -> Result<HashMap<String, String>, Error> {
-    let client = Client::try_default().await?;
-    let secrets_api: Api<Secret> = Api::namespaced(client, namespace);
+    let secrets_api: Api<Secret> = Api::namespaced(client.clone(), namespace);
 
     let mut map = HashMap::new();
 
     for secret_name in secret_names {
-        if let Ok(secret) = secrets_api.get(secret_name).await {
-            if let Some(data) = secret.data {
-                for (key, value) in data {
-                    // Secrets are base64 encoded
-                    let decoded = std::str::from_utf8(&value.0)?;
-                    map.insert(key.clone(), decoded.to_string());
-                }
+        let secret = secrets_api.get(secret_name).await?;
+        if let Some(data) = secret.data {
+            for (key, value) in data {
+                // Secrets are base64 encoded
+                let decoded = std::str::from_utf8(&value.0)?;
+                map.insert(key.clone(), decoded.to_string());
             }
         }
     }
