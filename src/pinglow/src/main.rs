@@ -106,6 +106,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         shared_checks.clone(),
         redis_client.clone(),
         config.redis_stream_max_len,
+        Client::try_default().await?,
+        config.clone(),
     ));
 
     // Spawn the task that will process the results
@@ -178,14 +180,18 @@ async fn load_checks(
                 ))?;
 
         // TODO: avoid cloning here
-        shared_checks.insert(check_name.to_owned(), Arc::new(check.clone()));
+        let definition = Arc::new(check.clone());
+        shared_checks.insert(check_name.to_owned(), definition.clone());
 
         let runnable_check = load_single_runnable_check(check, &client, config).await?;
 
         event_rx
-            .send(RunnableCheckEvent::AddOrUpdate(Arc::new(runnable_check)))
+            .send(RunnableCheckEvent::AddOrUpdate {
+                definition,
+                runnable: Some(Arc::new(runnable_check)),
+            })
             .await
-            .ok();
+            .map_err(|e| ReconcileError::SendError(format!("Error sending initial check: {e}")))?;
     }
 
     info!("Loaded {:?} check(s)", check_list.items.len());

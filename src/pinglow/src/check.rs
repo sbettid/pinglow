@@ -45,3 +45,44 @@ pub struct CheckSpec {
     pub muteNotificationsUntil: Option<DateTime<Utc>>,
     pub passive: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_known_process_exit_codes() {
+        assert_eq!(
+            map_command_exit_code_to_check_result(Some(0)),
+            CheckResultStatus::Ok
+        );
+        assert_eq!(
+            map_command_exit_code_to_check_result(Some(1)),
+            CheckResultStatus::Warning
+        );
+        assert_eq!(
+            map_command_exit_code_to_check_result(Some(2)),
+            CheckResultStatus::Critical
+        );
+        assert_eq!(
+            map_command_exit_code_to_check_result(Some(4)),
+            CheckResultStatus::Pending
+        );
+    }
+
+    #[test]
+    fn maps_unknown_or_missing_process_exit_codes_to_check_error() {
+        assert_eq!(
+            map_command_exit_code_to_check_result(Some(3)),
+            CheckResultStatus::CheckError
+        );
+        assert_eq!(
+            map_command_exit_code_to_check_result(Some(127)),
+            CheckResultStatus::CheckError
+        );
+        assert_eq!(
+            map_command_exit_code_to_check_result(None),
+            CheckResultStatus::CheckError
+        );
+    }
+}
