@@ -101,3 +101,79 @@ fn parse_autoclaim_payload(value: Value) -> Result<Option<(String, PinglowCheck)
     let payload = payload.ok_or_else(|| anyhow::anyhow!("Missing payload field"))?;
     Ok(Some((id, serde_json::from_str(&payload)?)))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bulk(value: &str) -> Value {
+        Value::BulkString(value.as_bytes().to_vec())
+    }
+
+    fn check_payload() -> String {
+        serde_json::to_string(&PinglowCheck {
+            passive: false,
+            script: None,
+            interval: Some(60),
+            check_name: "check-a".to_owned(),
+            secrets: None,
+            telegram_channels: vec![],
+            mute_notifications: None,
+            mute_notifications_until: None,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn parses_autoclaimed_check_payload() {
+        let payload = check_payload();
+        let value = Value::Array(vec![
+            bulk("0-0"),
+            Value::Array(vec![Value::Array(vec![
+                bulk("1712345678901-0"),
+                Value::Array(vec![bulk("payload"), bulk(&payload)]),
+            ])]),
+        ]);
+
+        let (id, check) = parse_autoclaim_payload(value).unwrap().unwrap();
+
+        assert_eq!(id, "1712345678901-0");
+        assert_eq!(check.check_name, "check-a");
+        assert_eq!(check.interval, Some(60));
+    }
+
+    #[test]
+    fn returns_none_when_autoclaim_contains_no_entries() {
+        let value = Value::Array(vec![bulk("0-0"), Value::Array(vec![])]);
+
+        assert!(parse_autoclaim_payload(value).unwrap().is_none());
+    }
+
+    #[test]
+    fn rejects_autoclaim_with_missing_payload() {
+        let value = Value::Array(vec![
+            bulk("0-0"),
+            Value::Array(vec![Value::Array(vec![
+                bulk("1712345678901-0"),
+                Value::Array(vec![bulk("other-field"), bulk("value")]),
+            ])]),
+        ]);
+
+        let error = parse_autoclaim_payload(value).unwrap_err();
+
+        assert!(error.to_string().contains("Missing payload field"));
+    }
+
+    #[test]
+    fn rejects_autoclaim_with_invalid_check_json() {
+        let value = Value::Array(vec![
+            bulk("0-0"),
+            Value::Array(vec![Value::Array(vec![
+                bulk("1712345678901-0"),
+                Value::Array(vec![bulk("payload"), bulk("{}")]),
+            ])]),
+        ]);
+
+        assert!(parse_autoclaim_payload(value).is_err());
+    }
+}

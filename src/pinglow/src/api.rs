@@ -8,10 +8,11 @@ use crate::{
     auth::{self, Authenticated, Operator},
     check::{Check, SharedPinglowChecks},
     config::PinglowConfig,
+    load_single_runnable_check,
     scheduler::enqueue_check,
 };
 use chrono::{DateTime, FixedOffset, Utc};
-use kube::Api;
+use kube::{Api, Client as KubeClient};
 use log::warn;
 use pinglow_common::{
     redis::redis_client, CheckResult, CheckResultStatus, PinglowCheck, ScriptLanguage,
@@ -490,21 +491,35 @@ pub async fn process_check_result(
 #[post("/check/<target_check>/schedule-now")]
 pub async fn schedule_now(
     _user: Operator,
-    checks: &State<SharedPinglowChecks>,
     pinglow_config: &State<PinglowConfig>,
     target_check: &str,
 ) -> Result<(), status::Custom<String>> {
-    // Read actual shared checks
-    let runnable_checks = checks.write().await;
-
-    // Ensure we can find the target check
-    let (_check_name, check) = runnable_checks
-        .iter()
-        .find(|&check| check.0 == target_check)
-        .ok_or(status::Custom(
-            Status::NotFound,
-            "Invalid target check".into(),
-        ))?;
+    let client = KubeClient::try_default().await.map_err(|e| {
+        status::Custom(
+            Status::InternalServerError,
+            format!("Error retrieving the Kube client: {e}"),
+        )
+    })?;
+    let checks_api: Api<Check> = Api::namespaced(client.clone(), &pinglow_config.target_namespace);
+    let definition = checks_api.get(target_check).await.map_err(|e| {
+        status::Custom(
+            if matches!(e, kube::Error::Api(ref response) if response.code == 404) {
+                Status::NotFound
+            } else {
+                Status::InternalServerError
+            },
+            format!("Error retrieving check {target_check}: {e}"),
+        )
+    })?;
+    let check = load_single_runnable_check(&definition, &client, pinglow_config)
+        .await
+        .map(Arc::new)
+        .map_err(|e| {
+            status::Custom(
+                Status::InternalServerError,
+                format!("Error resolving check {target_check}: {e}"),
+            )
+        })?;
 
     // Get redis client to enqueue the check
     let redis_client = redis_client().map_err(|e| {
@@ -526,7 +541,7 @@ pub async fn schedule_now(
 
     redis_conn.set_response_timeout(Duration::from_secs(30));
 
-    enqueue_check(&mut redis_conn, check, pinglow_config.redis_stream_max_len)
+    enqueue_check(&mut redis_conn, &check, pinglow_config.redis_stream_max_len)
         .await
         .map_err(|e| {
             status::Custom(

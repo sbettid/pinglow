@@ -108,23 +108,35 @@ async fn reconcile(check: Arc<Check>, ctx: Arc<ContextData>) -> Result<Action, R
         FINALIZER_NAME,
         check.clone(),
         |event: Event<Check>| async {
-            let check = check.clone();
             match event {
                 Event::Apply(c) => {
                     // Normal reconcile logic
                     info!("Reconciling Check: {}", c.name_any());
 
-                    let runnable_check =
-                        load_single_runnable_check(&check, &ctx.client, &ctx.config).await?;
-
-                    ctx.shared_checks.insert(check_name.clone(), check);
+                    let definition = c;
+                    ctx.shared_checks
+                        .insert(check_name.clone(), definition.clone());
+                    let (runnable, resolution_error) =
+                        match load_single_runnable_check(&definition, &ctx.client, &ctx.config)
+                            .await
+                        {
+                            Ok(runnable) => (Some(Arc::new(runnable)), None),
+                            Err(error) => (None, Some(error)),
+                        };
 
                     ctx.event_rx
-                        .send(RunnableCheckEvent::AddOrUpdate(Arc::new(runnable_check)))
+                        .send(RunnableCheckEvent::AddOrUpdate {
+                            definition,
+                            runnable,
+                        })
                         .await
                         .map_err(|e| {
                             ReconcileError::SendError(format!("Error sending event: {e}"))
                         })?;
+
+                    if let Some(error) = resolution_error {
+                        return Err(error);
+                    }
                     Ok(Action::await_change())
                 }
                 Event::Cleanup(c) => {

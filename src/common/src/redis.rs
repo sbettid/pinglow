@@ -73,3 +73,62 @@ pub fn parse_stream_payload(value: Value) -> Option<(String, HashMap<String, Str
 
     Some((id, map))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn bulk(value: &str) -> Value {
+        Value::BulkString(value.as_bytes().to_vec())
+    }
+
+    #[test]
+    fn parses_first_stream_entry_and_fields() {
+        let value = Value::Array(vec![Value::Array(vec![
+            bulk("pinglow:checks"),
+            Value::Array(vec![Value::Array(vec![
+                bulk("1712345678901-0"),
+                Value::Array(vec![bulk("payload"), bulk("{\"check_name\":\"test\"}")]),
+            ])]),
+        ])]);
+
+        let (id, fields) = parse_stream_payload(value).unwrap();
+
+        assert_eq!(id, "1712345678901-0");
+        assert_eq!(
+            fields.get("payload").map(String::as_str),
+            Some("{\"check_name\":\"test\"}")
+        );
+    }
+
+    #[test]
+    fn returns_none_for_empty_or_malformed_stream_response() {
+        assert_eq!(parse_stream_payload(Value::Array(vec![])), None);
+        assert_eq!(
+            parse_stream_payload(Value::Array(vec![Value::SimpleString(
+                "unexpected".to_owned()
+            )])),
+            None
+        );
+    }
+
+    #[test]
+    fn ignores_incomplete_trailing_field_pair() {
+        let value = Value::Array(vec![Value::Array(vec![
+            bulk("pinglow:checks"),
+            Value::Array(vec![Value::Array(vec![
+                bulk("1-0"),
+                Value::Array(vec![bulk("payload"), bulk("serialized"), bulk("orphan")]),
+            ])]),
+        ])]);
+
+        let (id, fields) = parse_stream_payload(value).unwrap();
+
+        assert_eq!(id, "1-0");
+        assert_eq!(fields.len(), 1);
+        assert_eq!(
+            fields.get("payload").map(String::as_str),
+            Some("serialized")
+        );
+    }
+}
