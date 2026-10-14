@@ -8,11 +8,6 @@ import RedocWrapper from '@site/src/components/RedocWrapper';
 
 import styles from './restapi.module.css';
 
-The `GET /check-history/{target_check}` endpoint accepts `page` (1-based,
-default `1`), `size` (default `10`), and `state_changes` (default `false`).
-Set `state_changes=true` to return the newest result from each consecutive
-run of the same status. Filtering happens before counting and pagination.
-
 <div className={styles.fullWidthRedoc}>
     <RedocWrapper />
 </div>
