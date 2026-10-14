@@ -8,6 +8,8 @@
 
 Pinglow is an open-source monitoring engine for Kubernetes. Describe what matters to you as Kubernetes resources, bring your own checks, and let Pinglow take care of running them and keeping track of the results.
 
+For more information about it please read the [Pinglow Documentation](https://sbettid.github.io/pinglow/).
+
 ## Checks and results
 
 Create `Check` and `Script` resources to run Python checks on a schedule, or report results from external systems with passive checks. Pinglow's controller queues work for its runners; results and performance data are saved so you can understand not just whether a check failed, but how it has been behaving over time.

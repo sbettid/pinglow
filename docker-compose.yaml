@@ -2,7 +2,7 @@ services:
 
   redis:
     image: redis:8
-    command: sh -c 'redis-server --requirepass "$REDIS_PASSWORD"'
+    command: sh -c 'redis-server --requirepass "$$REDIS_PASSWORD"'
     environment:
       REDIS_PASSWORD: pinglow
     ports:
@@ -22,12 +22,14 @@ services:
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.8.1
-    command: start-dev
+    command: start-dev --import-realm
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
     ports:
       - "8081:8080"
+    volumes:
+      - ./dev/keycloak:/opt/keycloak/data/import:ro,Z
 
 volumes:
   timescale-data:

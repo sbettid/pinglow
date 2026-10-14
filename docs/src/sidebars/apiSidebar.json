@@ -12,6 +12,11 @@
         },
         {
           "type": "link",
+          "label": "GET /check-history/{target_check}",
+          "href": "/docs/restapi#operation/get_check_history"
+        },
+        {
+          "type": "link",
           "label": "DELETE /check/{target_check}/mute",
           "href": "/docs/restapi#operation/unmute_check"
         },
