@@ -62,6 +62,7 @@ pub async fn start_rocket(
                 auth::logout,
                 get_checks,
                 get_check_status,
+                get_check_history,
                 get_performance_data,
                 mute_check,
                 unmute_check,
@@ -175,6 +176,154 @@ pub async fn get_check_status(
         timestamp: last_check_result.get("timestamp"),
         notifications_muted: check.mute_notifications,
         notifications_muted_until: check.mute_notifications_until,
+    }))
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct CheckHistoryEntryDto {
+    pub timestamp: DateTime<Utc>,
+    pub status: CheckResultStatus,
+    pub output: String,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct CheckHistoryPageDto {
+    #[schema(minimum = 1)]
+    pub page: u32,
+    #[schema(minimum = 1)]
+    pub size: u32,
+    pub total: i64,
+    pub history: Vec<CheckHistoryEntryDto>,
+}
+
+fn validate_history_pagination(
+    page: Option<u32>,
+    size: Option<u32>,
+) -> Result<(u32, u32, i64), status::Custom<String>> {
+    let page = page.unwrap_or(1);
+    let size = size.unwrap_or(10);
+
+    if page == 0 || size == 0 {
+        return Err(status::Custom(
+            Status::BadRequest,
+            "page and size must be greater than zero".to_owned(),
+        ));
+    }
+
+    let offset = (i64::from(page) - 1)
+        .checked_mul(i64::from(size))
+        .ok_or(status::Custom(
+            Status::BadRequest,
+            "Requested page is too large".to_owned(),
+        ))?;
+
+    Ok((page, size, offset))
+}
+
+const STATE_CHANGE_HISTORY_CTE: &str = "WITH ordered AS (
+    SELECT timestamp, status, output,
+           LEAD(status) OVER (ORDER BY timestamp DESC) AS older_status
+    FROM check_result
+    WHERE check_name = $1
+)";
+
+const STATE_CHANGE_FILTER: &str = "older_status IS NULL OR status <> older_status";
+
+#[utoipa::path(
+    get,
+    path = "/check-history/{target_check}",
+    params(
+        ("target_check" = String, Path, description = "The check whose status history is requested"),
+        ("page" = Option<u32>, Query, description = "1-based page number", minimum = 1, example = 1),
+        ("size" = Option<u32>, Query, description = "Number of history entries per page (defaults to 10)", minimum = 1, example = 10),
+        ("state_changes" = Option<bool>, Query, description = "When true, return only the newest result in each consecutive run of the same status", example = true)
+    ),
+    responses(
+        (status = 200, description = "Paginated status history for the check", body = CheckHistoryPageDto),
+        (status = 400, description = "Invalid pagination parameters"),
+        (status = 404, description = "The check does not exist"),
+        (status = 500, description = "Failed to retrieve check history")
+    )
+)]
+#[get("/check-history/<target_check>?<page>&<size>&<state_changes>")]
+pub async fn get_check_history(
+    _user: Authenticated,
+    checks: &State<SharedPinglowChecks>,
+    client: &State<Arc<Client>>,
+    target_check: &str,
+    page: Option<u32>,
+    size: Option<u32>,
+    state_changes: Option<bool>,
+) -> Result<Json<CheckHistoryPageDto>, status::Custom<String>> {
+    let (page, size, offset) = validate_history_pagination(page, size)?;
+    let state_changes = state_changes.unwrap_or(false);
+
+    if !checks.read().await.contains_key(target_check) {
+        return Err(status::Custom(
+            Status::NotFound,
+            "Invalid target check".to_owned(),
+        ));
+    }
+
+    let total_query = if state_changes {
+        format!(
+            "{STATE_CHANGE_HISTORY_CTE}
+            SELECT COUNT(*) FROM ordered WHERE {STATE_CHANGE_FILTER}"
+        )
+    } else {
+        "SELECT COUNT(*) FROM check_result WHERE check_name = $1".to_owned()
+    };
+    let total: i64 = client
+        .query_one(&total_query, &[&target_check])
+        .await
+        .map_err(|e| {
+            status::Custom(
+                Status::InternalServerError,
+                format!("Error retrieving check history count: {e}"),
+            )
+        })?
+        .get(0);
+
+    let history_query = if state_changes {
+        format!(
+            "{STATE_CHANGE_HISTORY_CTE}
+            SELECT timestamp, status, output FROM ordered
+            WHERE {STATE_CHANGE_FILTER}
+            ORDER BY timestamp DESC LIMIT $2 OFFSET $3"
+        )
+    } else {
+        "SELECT timestamp, status, output FROM check_result
+        WHERE check_name = $1
+        ORDER BY timestamp DESC LIMIT $2 OFFSET $3"
+            .to_owned()
+    };
+    let rows = client
+        .query(&history_query, &[&target_check, &i64::from(size), &offset])
+        .await
+        .map_err(|e| {
+            status::Custom(
+                Status::InternalServerError,
+                format!("Error retrieving check history: {e}"),
+            )
+        })?;
+
+    let history = rows
+        .into_iter()
+        .map(|row| {
+            let status: i16 = row.get("status");
+            CheckHistoryEntryDto {
+                timestamp: row.get("timestamp"),
+                status: CheckResultStatus::from(status),
+                output: row.get("output"),
+            }
+        })
+        .collect();
+
+    Ok(Json(CheckHistoryPageDto {
+        page,
+        size,
+        total,
+        history,
     }))
 }
 
@@ -555,10 +704,12 @@ pub async fn schedule_now(
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(get_checks, get_check_status, get_performance_data, mute_check, unmute_check, process_check_result, schedule_now),
+    paths(get_checks, get_check_status, get_check_history, get_performance_data, mute_check, unmute_check, process_check_result, schedule_now),
     components(schemas(
         SimpleCheckDto,
         SimpleCheckResultDto,
+        CheckHistoryEntryDto,
+        CheckHistoryPageDto,
         CheckResultStatus,
         ScriptLanguage
     )),
@@ -632,6 +783,68 @@ mod tests {
         let dto = SimpleCheckDto::from(&Arc::new(check));
         assert!(!dto.passive);
         assert_eq!(dto.interval, Some(60));
+    }
+
+    #[test]
+    fn test_history_pagination_defaults_and_offset() {
+        assert_eq!(validate_history_pagination(None, None).unwrap(), (1, 10, 0));
+        assert_eq!(
+            validate_history_pagination(Some(3), Some(25)).unwrap(),
+            (3, 25, 50)
+        );
+    }
+
+    #[test]
+    fn test_history_pagination_rejects_zero_values_and_overflow() {
+        assert_eq!(
+            validate_history_pagination(Some(0), None).unwrap_err().0,
+            Status::BadRequest
+        );
+        assert_eq!(
+            validate_history_pagination(None, Some(0)).unwrap_err().0,
+            Status::BadRequest
+        );
+        assert_eq!(
+            validate_history_pagination(Some(u32::MAX), Some(u32::MAX))
+                .unwrap_err()
+                .0,
+            Status::BadRequest
+        );
+        assert_eq!(
+            validate_history_pagination(Some(50_000), Some(100_000))
+                .unwrap()
+                .2,
+            4_999_900_000
+        );
+    }
+
+    #[test]
+    fn test_state_change_history_query_uses_status_transition_window() {
+        assert!(STATE_CHANGE_HISTORY_CTE
+            .contains("LEAD(status) OVER (ORDER BY timestamp DESC) AS older_status"));
+        assert_eq!(
+            STATE_CHANGE_FILTER,
+            "older_status IS NULL OR status <> older_status"
+        );
+    }
+
+    #[test]
+    fn test_history_endpoint_openapi_documents_state_changes_filter() {
+        let openapi = serde_json::to_value(ApiDoc::openapi()).unwrap();
+        let parameters = openapi["paths"]["/check-history/{target_check}"]["get"]["parameters"]
+            .as_array()
+            .unwrap();
+        let state_changes = parameters
+            .iter()
+            .find(|parameter| parameter["name"] == "state_changes")
+            .expect("state_changes query parameter should be documented");
+
+        assert_eq!(state_changes["in"], "query");
+        assert_eq!(state_changes["schema"]["type"], "boolean");
+        assert!(state_changes["description"]
+            .as_str()
+            .unwrap()
+            .contains("newest result in each consecutive run"));
     }
 
     #[test]

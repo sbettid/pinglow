@@ -1,0 +1,37 @@
+{
+  "realm": "pinglow",
+  "enabled": true,
+  "clients": [
+    {
+      "clientId": "pinglow",
+      "name": "Pinglow local development",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "pinglow-dev-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "http://localhost:5173/api/auth/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:5173"
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "dev",
+      "enabled": true,
+      "email": "dev@example.com",
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dev",
+          "temporary": false
+        }
+      ]
+    }
+  ]
+}
