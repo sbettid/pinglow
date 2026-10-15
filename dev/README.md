@@ -15,9 +15,14 @@ Then run the controller on your machine against a dedicated Kind cluster:
 
 The helper creates or reuses the `pinglow-dev` Kind cluster, installs
 Pinglow's CRDs, creates the `pinglow` namespace and an admin login binding,
-then starts the controller locally. It uses a temporary kubeconfig for this
-cluster and does not change the current kubectl context. The user email must
-match the email of a Keycloak user.
+applies a sample heartbeat check, then starts the controller locally. The
+heartbeat runs every minute without external dependencies, reports the current
+UTC time, and records hour/minute metrics for the performance chart. It uses a
+temporary kubeconfig for this cluster and does not change the current kubectl
+context. The helper starts both the controller and runner, and stops the other
+process if either one exits. The runner executes scripts locally, so Python 3
+with the `venv` module must be installed. The user email must match the email
+of a Keycloak user.
 
 In a second terminal, run the frontend in Vite development mode:
 

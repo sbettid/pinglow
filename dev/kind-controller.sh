@@ -29,7 +29,26 @@ for command in kind kubectl cargo; do
 done
 
 KUBECONFIG_FILE="$(mktemp)"
-trap 'rm -f "$KUBECONFIG_FILE"' EXIT
+RUNNER_PID=""
+CONTROLLER_PID=""
+
+cleanup() {
+  for pid in "$RUNNER_PID" "$CONTROLLER_PID"; do
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      kill "$pid"
+    fi
+  done
+
+  for pid in "$RUNNER_PID" "$CONTROLLER_PID"; do
+    if [[ -n "$pid" ]]; then
+      wait "$pid" 2>/dev/null || true
+    fi
+  done
+
+  rm -f "$KUBECONFIG_FILE"
+}
+
+trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 export KUBECONFIG="$KUBECONFIG_FILE"
@@ -50,6 +69,8 @@ kubectl --context "kind-$CLUSTER_NAME" wait \
   crd/telegramchannels.pinglow.io
 kubectl --context "kind-$CLUSTER_NAME" create namespace "$NAMESPACE" \
   --dry-run=client -o yaml | kubectl --context "kind-$CLUSTER_NAME" apply -f -
+kubectl --context "kind-$CLUSTER_NAME" --namespace "$NAMESPACE" \
+  apply -f "$ROOT_DIR/dev/demo-checks.yaml"
 kubectl --context "kind-$CLUSTER_NAME" apply -f - <<EOF
 apiVersion: pinglow.io/v1alpha1
 kind: PinglowUserBinding
@@ -73,7 +94,19 @@ export OIDC_CLIENT_ID="${OIDC_CLIENT_ID:-pinglow}"
 export OIDC_CLIENT_SECRET="${OIDC_CLIENT_SECRET:-pinglow-dev-secret}"
 export OIDC_REDIRECT_URL="${OIDC_REDIRECT_URL:-http://localhost:5173/api/auth/callback}"
 export OIDC_COOKIE_SECURE=false
+export RUNNER_NAME="${RUNNER_NAME:-pinglow-dev-runner}"
+export CHECKS_BASE_PATH="${CHECKS_BASE_PATH:-${TMPDIR:-/tmp}/pinglow-dev-checks}"
 
-echo "Running Pinglow locally against Kind context kind-$CLUSTER_NAME."
+echo "Running Pinglow and its check runner locally against Kind context kind-$CLUSTER_NAME."
 echo "Start the frontend separately with: cd $ROOT_DIR/../pinglow-frontend/client && npm run dev"
-cargo run -p pinglow
+
+cargo run -p pinglow-runner &
+RUNNER_PID=$!
+cargo run -p pinglow &
+CONTROLLER_PID=$!
+
+set +e
+wait -n "$RUNNER_PID" "$CONTROLLER_PID"
+status=$?
+set -e
+exit "$status"
