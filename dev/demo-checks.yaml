@@ -1,0 +1,22 @@
+apiVersion: pinglow.io/v1alpha1
+kind: Script
+metadata:
+  name: pinglow-dev-heartbeat
+spec:
+  language: Python
+  content: |
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    print(
+        f"Pinglow development check is running at {now.isoformat()} "
+        f"|hour_utc={now.hour},minute_utc={now.minute}"
+    )
+---
+apiVersion: pinglow.io/v1alpha1
+kind: Check
+metadata:
+  name: pinglow-dev-heartbeat
+spec:
+  scriptRef: pinglow-dev-heartbeat
+  interval: 60

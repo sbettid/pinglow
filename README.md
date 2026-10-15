@@ -24,6 +24,10 @@ Pinglow is written in Rust and developed in my free time. It is an evolving proj
 
 ## 🚀 Take a look
 
-Curious to see it in action? Start with the **[quick start](https://sbettid.github.io/pinglow/docs/deployment/quick-start)**, explore the **[full documentation](https://sbettid.github.io/pinglow/)**, or visit the **[frontend project](https://github.com/sbettid/pinglow-frontend)**.
+Curious to see it in action? Start with the **[quick start](https://sbettid.github.io/pinglow/docs/deployment/quick-start)**, explore the **[full documentation](https://sbettid.github.io/pinglow/)**, or visit the **[frontend project](https://github.com/sbettid/pinglow-frontend)**. 
 
 The docs also cover [deployment](https://sbettid.github.io/pinglow/docs/deployment), [OIDC authentication](https://sbettid.github.io/pinglow/docs/deployment/oidc), and the [REST API](https://sbettid.github.io/pinglow/docs/restapi).
+
+## Local development
+
+In case you are interested in contributing, you can follow the [local development guide](./dev/README.md) to run Pinglow with Kind.
