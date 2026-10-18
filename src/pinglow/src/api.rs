@@ -8,7 +8,7 @@ use crate::{
     auth::{self, Authenticated, Operator},
     check::{Check, SharedPinglowChecks},
     config::PinglowConfig,
-    load_single_runnable_check,
+    load_single_runnable_check, notification_mute_state,
     scheduler::enqueue_check,
 };
 use chrono::{DateTime, FixedOffset, Utc};
@@ -151,6 +151,12 @@ pub async fn get_check_status(
         .iter()
         .find(|&check| check.0 == target_check)?;
 
+    let notifications_muted = notification_mute_state(
+        check.mute_notifications,
+        check.mute_notifications_until,
+        Utc::now(),
+    );
+
     let last_check_result_from_db = client.query_opt("SELECT timestamp,status,output from check_result where check_name = $1 order by timestamp desc limit 1", &[&target_check]).await.ok()?;
 
     let last_check_result = if let Some(last_check_result) = last_check_result_from_db {
@@ -162,7 +168,7 @@ pub async fn get_check_status(
             output: "Check still needs to be executed".to_owned(),
             status: CheckResultStatus::Pending,
             timestamp: None,
-            notifications_muted: check.mute_notifications,
+            notifications_muted,
             notifications_muted_until: check.mute_notifications_until,
         }));
     };
@@ -174,7 +180,7 @@ pub async fn get_check_status(
         output: last_check_result.get("output"),
         status: CheckResultStatus::from(check_status),
         timestamp: last_check_result.get("timestamp"),
-        notifications_muted: check.mute_notifications,
+        notifications_muted,
         notifications_muted_until: check.mute_notifications_until,
     }))
 }
