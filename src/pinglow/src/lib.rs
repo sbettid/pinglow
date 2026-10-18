@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use anyhow::Error;
 use base64::{engine::general_purpose, Engine};
-use chrono::{Local, Utc};
+use chrono::{DateTime, Local, Utc};
 use html_escape::encode_safe;
 use k8s_openapi::api::core::v1::Secret;
 use kube::{Api, Client};
@@ -28,6 +28,17 @@ pub mod db;
 pub mod error;
 pub mod results;
 pub mod scheduler;
+
+pub(crate) fn notification_mute_state(
+    mute_notifications: Option<bool>,
+    mute_notifications_until: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> Option<bool> {
+    match mute_notifications {
+        Some(true) => Some(mute_notifications_until.map_or(true, |until| until > now)),
+        mute_state => mute_state,
+    }
+}
 
 pub async fn load_single_runnable_check(
     check: &Check,
@@ -157,15 +168,12 @@ pub async fn process_check_result(
     // Send result to telegram channels
     if result.status != CheckResultStatus::Ok
         && result.status != CheckResultStatus::Pending
-        && match result.mute_notifications {
-            Some(true) => {
-                match result.mute_notifications_until {
-                    Some(until) => until <= Utc::now(), // check if mute until is still valid
-                    None => false,                      // muted forever: don't send
-                }
-            }
-            _ => true, // if mute_notifications is None or false we send the notification
-        }
+        && !notification_mute_state(
+            result.mute_notifications,
+            result.mute_notifications_until,
+            Utc::now(),
+        )
+        .unwrap_or(false)
     {
         let timestamp_local = result
             .timestamp
@@ -221,4 +229,31 @@ pub async fn process_check_result(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::notification_mute_state;
+    use chrono::{Duration, Utc};
+
+    #[test]
+    fn notification_mute_state_respects_expiration() {
+        let now = Utc::now();
+
+        assert_eq!(
+            notification_mute_state(Some(true), Some(now + Duration::hours(8)), now),
+            Some(true)
+        );
+        assert_eq!(
+            notification_mute_state(Some(true), Some(now), now),
+            Some(false)
+        );
+        assert_eq!(
+            notification_mute_state(Some(true), Some(now - Duration::seconds(1)), now),
+            Some(false)
+        );
+        assert_eq!(notification_mute_state(Some(true), None, now), Some(true));
+        assert_eq!(notification_mute_state(Some(false), None, now), Some(false));
+        assert_eq!(notification_mute_state(None, None, now), None);
+    }
 }

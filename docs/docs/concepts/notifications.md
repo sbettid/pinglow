@@ -50,6 +50,7 @@ For this reason, Pinglow allows to mute/unmute notifications.
 This is possible by setting the corresponding `muteNotifications` attribute (`true`/`false`) in the `Check` definition.
 Furthermore, the `muteNotificationsUntil` attribute allow to specify until which date the notifications should be muted.
 Note that not specifying it will mute notificatons for that check until they are explicitly removed.
+After the specified time passes, notifications resume automatically, even if `muteNotifications` remains `true` in the Check definition.
 
 Of course, muting notifications by modifiying the corresponding object in Kubernetes is not always the most comfortable way and, 
 for this reason, this option is also available through the dedicated [RestAPI](/docs/restapi#operation/process_check_result).
