@@ -22,6 +22,7 @@ pub struct OidcConfig {
     pub client_secret: String,
     pub redirect_url: String,
     pub extra_ca_cert_path: Option<String>,
+    pub groups_claim: String,
 }
 
 /**
@@ -42,7 +43,14 @@ pub fn get_config_from_env() -> PinglowConfig {
         db_retention_check_results: env::var("DB_RETENTION_CHECK_RESULTS").unwrap_or("7 days".to_string()),
         db_retention_perf_data: env::var("DB_RETENTION_PERF_DATA").unwrap_or("7 days".to_string()),
         oidc: match (env::var("OIDC_ISSUER_URL"), env::var("OIDC_CLIENT_ID"), env::var("OIDC_CLIENT_SECRET"), env::var("OIDC_REDIRECT_URL")) {
-            (Ok(issuer), Ok(client_id), Ok(client_secret), Ok(redirect_url)) => Some(OidcConfig { issuer, client_id, client_secret, redirect_url, extra_ca_cert_path: env::var("OIDC_EXTRA_CA_CERT_PATH").ok(), }),
+            (Ok(issuer), Ok(client_id), Ok(client_secret), Ok(redirect_url)) => Some(OidcConfig {
+                issuer,
+                client_id,
+                client_secret,
+                redirect_url,
+                extra_ca_cert_path: env::var("OIDC_EXTRA_CA_CERT_PATH").ok(),
+                groups_claim: env::var("OIDC_GROUPS_CLAIM").unwrap_or_else(|_| "groups".to_string()),
+            }),
             (Err(_), Err(_), Err(_), Err(_)) => None,
             _ => panic!("OIDC configuration requires OIDC_ISSUER_URL, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET, and OIDC_REDIRECT_URL"),
         },

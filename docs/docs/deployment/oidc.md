@@ -13,7 +13,7 @@ OIDC handles *who the user is*. *What the user may do* is decided by [`PinglowUs
 1. The browser opens `/auth/login`. Pinglow reads the provider's discovery document (`<issuer>/.well-known/openid-configuration`) and redirects the user to the provider, requesting the scopes `openid profile email`.
 2. After login, the provider redirects the browser back to `OIDC_REDIRECT_URL` (`/auth/callback`).
 3. Pinglow exchanges the code for an ID token and validates its signature, issuer, audience (the client ID) and nonce.
-4. Pinglow looks for a `PinglowUserBinding` matching the token's `sub` claim first, then its `email` claim.
+4. Pinglow looks for `PinglowUserBinding` resources matching the token's `sub`, `email`, and configured groups claim. If several bindings match, the most privileged role is granted.
    - No match: login is rejected with `403 Forbidden`.
    - Match: a session is stored in Redis and the browser receives a `pinglow_session` cookie (`HttpOnly`, `SameSite=Lax`, `Secure` by default).
 
@@ -37,6 +37,7 @@ The Helm chart reads the OIDC settings from a Secret, named `pinglow-oidc` by de
 | `OIDC_CLIENT_SECRET` | yes | Client secret. |
 | `OIDC_REDIRECT_URL` | yes | Public callback URL, `https://<host>/auth/callback`. Must match the provider's allowed redirect URI. |
 | `OIDC_COOKIE_SECURE` | no | Set to `"false"` to allow the session cookie over plain HTTP. Defaults to secure. |
+| `OIDC_GROUPS_CLAIM` | no | ID-token claim containing groups as an array of strings. Supports dot-separated paths into nested claims (for example, `realm_access.roles`). Defaults to `groups`. |
 
 ```yaml
 apiVersion: v1
@@ -50,6 +51,7 @@ stringData:
   OIDC_CLIENT_ID: pinglow
   OIDC_CLIENT_SECRET: change-me
   OIDC_REDIRECT_URL: https://pinglow.example.com/auth/callback
+  OIDC_GROUPS_CLAIM: groups
 ```
 
 Or from the command line:
@@ -59,7 +61,8 @@ kubectl create secret generic pinglow-oidc -n pinglow \
   --from-literal=OIDC_ISSUER_URL=https://auth.example.com/realms/pinglow \
   --from-literal=OIDC_CLIENT_ID=pinglow \
   --from-literal=OIDC_CLIENT_SECRET=change-me \
-  --from-literal=OIDC_REDIRECT_URL=https://pinglow.example.com/auth/callback
+  --from-literal=OIDC_REDIRECT_URL=https://pinglow.example.com/auth/callback \
+  --from-literal=OIDC_GROUPS_CLAIM=groups
 ```
 
 :::warning
