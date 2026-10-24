@@ -8,7 +8,7 @@ use kube::{
     runtime::{
         controller::{Action, Controller},
         finalizer::{finalizer, Event},
-        watcher, WatchStreamExt,
+        watcher,
     },
     Api, Client, Resource, ResourceExt,
 };
@@ -30,7 +30,7 @@ use tokio::sync::RwLock;
 use crate::config::{OidcConfig, PinglowConfig};
 use pinglow_common::{ApiKeyBinding, PinglowUserBinding, UserRole};
 
-type BindingCache = Arc<RwLock<HashMap<String, UserRole>>>;
+type BindingCache = Arc<RwLock<HashMap<String, HashMap<String, UserRole>>>>;
 type ApiKeyCache = Arc<RwLock<HashMap<String, ApiKeyCredential>>>;
 
 #[derive(Clone)]
@@ -73,6 +73,8 @@ struct Claims {
     sub: String,
     email: Option<String>,
     nonce: String,
+    #[serde(flatten)]
+    additional: serde_json::Map<String, Value>,
 }
 
 pub async fn create_auth_state(
@@ -266,25 +268,20 @@ pub async fn watch_bindings(
     let client = Client::try_default().await?;
     let api: Api<PinglowUserBinding> = Api::namespaced(client, &config.target_namespace);
     watcher(api, watcher::Config::default())
-        .applied_objects()
-        .for_each(|binding| {
+        .for_each(|event| {
             let state = state.clone();
             async move {
-                match binding {
-                    Ok(binding) => {
+                match event {
+                    Ok(watcher::Event::Apply(binding) | watcher::Event::InitApply(binding)) => {
                         let mut cache = state.bindings.write().await;
-                        let name = binding.name_any();
-                        cache.retain(|_, role| {
-                            binding.metadata.name.as_deref() != Some(name.as_str())
-                                || *role != binding.spec.role
-                        });
-                        for identity in [binding.spec.subject, binding.spec.email]
-                            .into_iter()
-                            .flatten()
-                        {
-                            cache.insert(identity, binding.spec.role.clone());
-                        }
+                        replace_binding(&mut cache, &binding);
                     }
+                    Ok(watcher::Event::Delete(binding)) => {
+                        let mut cache = state.bindings.write().await;
+                        remove_binding(&mut cache, &binding.name_any());
+                    }
+                    Ok(watcher::Event::Init) => state.bindings.write().await.clear(),
+                    Ok(watcher::Event::InitDone) => {}
                     Err(error) => warn!("User binding watch error: {error}"),
                 }
             }
@@ -300,14 +297,83 @@ async fn refresh_bindings(config: &PinglowConfig, state: &AuthState) -> Result<(
     let mut cache = state.bindings.write().await;
     cache.clear();
     for binding in bindings {
-        for identity in [binding.spec.subject, binding.spec.email]
-            .into_iter()
-            .flatten()
-        {
-            cache.insert(identity, binding.spec.role.clone());
-        }
+        insert_binding(&mut cache, &binding);
     }
     Ok(())
+}
+
+fn replace_binding(
+    cache: &mut HashMap<String, HashMap<String, UserRole>>,
+    binding: &PinglowUserBinding,
+) {
+    let name = binding.name_any();
+    remove_binding(cache, &name);
+    insert_binding(cache, binding);
+}
+
+fn remove_binding(cache: &mut HashMap<String, HashMap<String, UserRole>>, name: &str) {
+    for entries in cache.values_mut() {
+        entries.remove(name);
+    }
+    cache.retain(|_, entries| !entries.is_empty());
+}
+
+fn insert_binding(
+    cache: &mut HashMap<String, HashMap<String, UserRole>>,
+    binding: &PinglowUserBinding,
+) {
+    let name = binding.name_any();
+    for identity in [binding.spec.subject.clone(), binding.spec.email.clone()]
+        .into_iter()
+        .flatten()
+        .chain(binding.spec.groups.clone().unwrap_or_default())
+    {
+        cache
+            .entry(identity)
+            .or_default()
+            .insert(name.clone(), binding.spec.role.clone());
+    }
+}
+
+fn role_priority(role: &UserRole) -> u8 {
+    match role {
+        UserRole::Viewer => 0,
+        UserRole::Operator => 1,
+        UserRole::Admin => 2,
+    }
+}
+
+fn group_claims(claims: &Claims, claim_path: &str) -> Vec<String> {
+    let root = Value::Object(claims.additional.clone());
+    let mut value = &root;
+    for segment in claim_path.split('.') {
+        let Some(next) = value.get(segment) else {
+            return Vec::new();
+        };
+        value = next;
+    }
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::to_owned)
+        .collect()
+}
+
+fn resolve_role(
+    bindings: &HashMap<String, HashMap<String, UserRole>>,
+    claims: &Claims,
+    groups_claim: &str,
+) -> Option<UserRole> {
+    let groups = group_claims(claims, groups_claim);
+    std::iter::once(claims.sub.as_str())
+        .chain(claims.email.as_deref())
+        .chain(groups.iter().map(String::as_str))
+        .filter_map(|claim| bindings.get(claim))
+        .flat_map(|binding_roles| binding_roles.values())
+        .cloned()
+        .max_by_key(role_priority)
 }
 
 fn random_value() -> String {
@@ -494,10 +560,7 @@ pub async fn callback(
         .map_err(|_| Status::Unauthorized)?;
     let role = {
         let bindings = auth_state.bindings.read().await;
-        bindings
-            .get(&claims.sub)
-            .or_else(|| claims.email.as_ref().and_then(|email| bindings.get(email)))
-            .cloned()
+        resolve_role(&bindings, &claims, &oidc.groups_claim)
     }
     .ok_or(Status::Forbidden)?;
     let session_id = random_value();
@@ -591,6 +654,64 @@ async fn verify_id_token(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_claims(additional: Value) -> Claims {
+        Claims {
+            aud: Value::String("client".to_string()),
+            sub: "user-123".to_string(),
+            email: Some("alice@example.com".to_string()),
+            nonce: "nonce".to_string(),
+            additional: additional.as_object().unwrap().clone(),
+        }
+    }
+
+    #[test]
+    fn test_group_claims_support_nested_paths() {
+        let claims = test_claims(serde_json::json!({
+            "realm_access": { "roles": ["operators", "employees"] }
+        }));
+
+        assert_eq!(
+            group_claims(&claims, "realm_access.roles"),
+            vec!["operators", "employees"]
+        );
+    }
+
+    #[test]
+    fn test_group_claims_ignore_missing_or_non_string_values() {
+        let claims = test_claims(serde_json::json!({
+            "groups": ["operators", 42]
+        }));
+
+        assert_eq!(group_claims(&claims, "groups"), vec!["operators"]);
+        assert!(group_claims(&claims, "missing").is_empty());
+    }
+
+    #[test]
+    fn test_resolve_role_uses_most_privileged_matching_binding() {
+        let claims = test_claims(serde_json::json!({
+            "groups": ["operators", "admins"]
+        }));
+        let bindings = HashMap::from([
+            (
+                "user-123".to_string(),
+                HashMap::from([("user-binding".to_string(), UserRole::Viewer)]),
+            ),
+            (
+                "operators".to_string(),
+                HashMap::from([("operator-binding".to_string(), UserRole::Operator)]),
+            ),
+            (
+                "admins".to_string(),
+                HashMap::from([("admin-binding".to_string(), UserRole::Admin)]),
+            ),
+        ]);
+
+        assert_eq!(
+            resolve_role(&bindings, &claims, "groups"),
+            Some(UserRole::Admin)
+        );
+    }
 
     #[test]
     fn test_random_value_length() {
