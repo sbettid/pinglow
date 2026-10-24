@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    check::{Check, SharedChecks, TelegramChannel},
+    check::{Check, CheckGroup, SharedChecks, TelegramChannel},
     config::PinglowConfig,
     error::ReconcileError,
     load_single_runnable_check,
@@ -50,6 +50,8 @@ pub async fn watch_resources(
 
     let telegram_channels: Api<TelegramChannel> =
         Api::namespaced(client.clone(), &pinglow_config.target_namespace);
+    let check_groups: Api<CheckGroup> =
+        Api::namespaced(client.clone(), &pinglow_config.target_namespace);
 
     let config = watcher::Config::default();
 
@@ -73,6 +75,10 @@ pub async fn watch_resources(
         .watches(telegram_channels, config, {
             let shared = Arc::clone(&shared_original_checks);
             move |channel| map_channel_to_checks(channel, shared.clone())
+        })
+        .watches(check_groups, watcher::Config::default(), {
+            let shared = Arc::clone(&shared_original_checks);
+            move |group| map_group_to_checks(group, shared.clone())
         })
         .run(reconcile, error_policy, context)
         .for_each(|res| async move {
@@ -267,4 +273,17 @@ fn map_channel_to_checks(
         .collect();
 
     object_refs
+}
+
+fn map_group_to_checks(
+    group: CheckGroup,
+    shared_original_checks: SharedChecks,
+) -> Vec<ObjectRef<Check>> {
+    let group_name = group.metadata.name.unwrap_or_default();
+
+    shared_original_checks
+        .iter()
+        .filter(|entry| entry.spec.groupRef.as_deref() == Some(group_name.as_str()))
+        .map(|entry| ObjectRef::from(entry.value().as_ref()))
+        .collect()
 }

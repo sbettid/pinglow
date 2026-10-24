@@ -240,6 +240,10 @@ pub struct PinglowCheck {
     pub script: Option<ScriptSpec>,
     pub interval: Option<u64>,
     pub check_name: String,
+    #[serde(default)]
+    pub group_id: Option<String>,
+    #[serde(default)]
+    pub group_name: Option<String>,
     pub secrets: Option<HashMap<String, String>>,
     pub telegram_channels: Vec<ConcreteTelegramChannel>,
     pub mute_notifications: Option<bool>,
@@ -273,6 +277,25 @@ impl Ord for ScheduledCheck {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deserializes_check_payloads_without_group_metadata() {
+        let payload = r#"{
+            "passive": true,
+            "script": null,
+            "interval": null,
+            "check_name": "legacy-check",
+            "secrets": null,
+            "telegram_channels": [],
+            "mute_notifications": null,
+            "mute_notifications_until": null
+        }"#;
+
+        let check: PinglowCheck = serde_json::from_str(payload).unwrap();
+
+        assert_eq!(check.group_id, None);
+        assert_eq!(check.group_name, None);
+    }
 
     #[test]
     fn test_user_role_equality() {
@@ -325,6 +348,8 @@ mod tests {
             script: None,
             interval: Some(300),
             check_name: "check1".to_string(),
+            group_id: None,
+            group_name: None,
             secrets: None,
             telegram_channels: vec![],
             mute_notifications: None,
@@ -336,6 +361,8 @@ mod tests {
             script: None,
             interval: Some(300),
             check_name: "check2".to_string(),
+            group_id: None,
+            group_name: None,
             secrets: None,
             telegram_channels: vec![],
             mute_notifications: None,
@@ -366,6 +393,8 @@ mod tests {
             script: None,
             interval: Some(300),
             check_name: "check1".to_string(),
+            group_id: None,
+            group_name: None,
             secrets: None,
             telegram_channels: vec![],
             mute_notifications: None,
@@ -377,6 +406,8 @@ mod tests {
             script: None,
             interval: Some(300),
             check_name: "check2".to_string(),
+            group_id: None,
+            group_name: None,
             secrets: None,
             telegram_channels: vec![],
             mute_notifications: None,

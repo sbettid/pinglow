@@ -1,4 +1,11 @@
 apiVersion: pinglow.io/v1alpha1
+kind: CheckGroup
+metadata:
+  name: development
+spec:
+  displayName: Development
+---
+apiVersion: pinglow.io/v1alpha1
 kind: Script
 metadata:
   name: pinglow-dev-heartbeat
@@ -18,5 +25,15 @@ kind: Check
 metadata:
   name: pinglow-dev-heartbeat
 spec:
+  groupRef: development
+  scriptRef: pinglow-dev-heartbeat
+  interval: 60
+---
+apiVersion: pinglow.io/v1alpha1
+kind: Check
+metadata:
+  name: pinglow-dev-heartbeat-secondary
+spec:
+  groupRef: development
   scriptRef: pinglow-dev-heartbeat
   interval: 60
