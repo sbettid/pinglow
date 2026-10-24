@@ -107,7 +107,7 @@ information on how to configure them!
 
 ## Grouping checks
 
-Checks can be organized into collapsible groups in the web UI. A `CheckGroup` resource's Kubernetes name is its stable identity; checks refer to it with `groupRef`. The group's `displayName` is shown in the UI and can be changed without changing that identity.
+Checks can be organized into groups using `CheckGroup` resources. A group's Kubernetes name is its stable identity; checks refer to it with `groupRef`. Its `displayName` is a human-readable name that can be changed without changing that identity.
 
 ```yaml
 apiVersion: pinglow.io/v1alpha1
@@ -129,4 +129,4 @@ spec:
   interval: 300
 ```
 
-Checks without `groupRef` appear under **Ungrouped**. The UI search matches check names, group display names, and group IDs. Grouping only affects organization and search; it does not restrict API access.
+Checks may omit `groupRef` if they do not belong to a group. Grouping is organizational metadata and does not restrict API access.
