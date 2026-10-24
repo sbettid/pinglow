@@ -204,6 +204,7 @@ pub struct PinglowUserBindingSpec {
     pub role: UserRole,
     pub subject: Option<String>,
     pub email: Option<String>,
+    pub groups: Option<Vec<String>>,
 }
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]

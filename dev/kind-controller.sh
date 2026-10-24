@@ -53,10 +53,33 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 export KUBECONFIG="$KUBECONFIG_FILE"
 
-if kind get clusters | grep -Fxq "$CLUSTER_NAME"; then
-  kind export kubeconfig --name "$CLUSTER_NAME" --kubeconfig "$KUBECONFIG_FILE"
-else
+create_cluster() {
   kind create cluster --name "$CLUSTER_NAME" --kubeconfig "$KUBECONFIG_FILE"
+  kubectl --context "kind-$CLUSTER_NAME" wait \
+    --for=condition=Ready \
+    nodes \
+    --all \
+    --timeout=120s
+}
+
+cluster_is_healthy() {
+  kind export kubeconfig --name "$CLUSTER_NAME" --kubeconfig "$KUBECONFIG_FILE" \
+    && kubectl --context "kind-$CLUSTER_NAME" get nodes --request-timeout=10s >/dev/null 2>&1 \
+    && kubectl --context "kind-$CLUSTER_NAME" wait \
+      --for=condition=Ready \
+      nodes \
+      --all \
+      --timeout=90s >/dev/null 2>&1
+}
+
+if kind get clusters | grep -Fxq "$CLUSTER_NAME"; then
+  if ! cluster_is_healthy; then
+    echo "Kind cluster '$CLUSTER_NAME' is unavailable or unhealthy; recreating this disposable dev cluster."
+    kind delete cluster --name "$CLUSTER_NAME"
+    create_cluster
+  fi
+else
+  create_cluster
 fi
 
 kubectl --context "kind-$CLUSTER_NAME" apply -f "$ROOT_DIR/charts/pinglow/crds/"
@@ -79,6 +102,16 @@ metadata:
   namespace: $NAMESPACE
 spec:
   email: $USER_EMAIL
+  role: viewer
+---
+apiVersion: pinglow.io/v1alpha1
+kind: PinglowUserBinding
+metadata:
+  name: local-development-admin-group
+  namespace: $NAMESPACE
+spec:
+  groups:
+    - pinglow-admins
   role: admin
 EOF
 
@@ -93,6 +126,7 @@ export OIDC_ISSUER_URL="${OIDC_ISSUER_URL:-http://localhost:8081/realms/pinglow}
 export OIDC_CLIENT_ID="${OIDC_CLIENT_ID:-pinglow}"
 export OIDC_CLIENT_SECRET="${OIDC_CLIENT_SECRET:-pinglow-dev-secret}"
 export OIDC_REDIRECT_URL="${OIDC_REDIRECT_URL:-http://localhost:5173/api/auth/callback}"
+export OIDC_GROUPS_CLAIM="${OIDC_GROUPS_CLAIM:-groups}"
 export OIDC_COOKIE_SECURE=false
 export RUNNER_NAME="${RUNNER_NAME:-pinglow-dev-runner}"
 export CHECKS_BASE_PATH="${CHECKS_BASE_PATH:-${TMPDIR:-/tmp}/pinglow-dev-checks}"
