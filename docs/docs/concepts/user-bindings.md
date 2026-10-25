@@ -44,6 +44,7 @@ spec:
 - **email** (optional): The user's email address from the OIDC provider (typically the email claim).
 - **subject** (optional): The user's subject identifier from the OIDC provider (the `sub` claim).
 - **groups** (optional): OIDC group names that receive this role. The provider must include these group names in the configured ID-token groups claim.
+- **check_groups** (optional): Allowlist of `CheckGroup` resource names this binding can access. When omitted, the binding has access to all checks. When set, checks without a group and checks in unlisted groups are not accessible.
 - **role** (required): One of `viewer`, `operator`, or `admin`.
 
 At least one of `email`, `subject`, or `groups` must be specified.
@@ -53,6 +54,25 @@ At least one of `email`, `subject`, or `groups` must be specified.
 The binding's `email` and `subject` fields are matched against claims in the OIDC ID token returned during browser login. Group bindings are matched against the ID-token claim configured by `OIDC_GROUPS_CLAIM` (default: `groups`). Pinglow grants the most privileged role among all matching subject, email, and group bindings (`admin` > `operator` > `viewer`).
 
 If no binding matches the authenticated user, the login is rejected with a `403 Forbidden` response.
+
+When several bindings match, Pinglow selects the highest role and combines the group allowlists from bindings with that role. If any such binding omits `check_groups`, access is unrestricted. Admins always have access to all groups.
+
+After deploying group-scoped permissions, users with existing browser sessions must sign in again.
+
+**Viewer limited to selected groups:**
+```yaml
+apiVersion: pinglow.io/v1alpha1
+kind: PinglowUserBinding
+metadata:
+  name: home-viewer
+  namespace: pinglow
+spec:
+  email: viewer@example.com
+  role: viewer
+  check_groups:
+    - home-network
+    - home-services
+```
 
 ## Examples
 

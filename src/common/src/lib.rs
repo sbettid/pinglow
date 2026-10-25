@@ -205,6 +205,7 @@ pub struct PinglowUserBindingSpec {
     pub subject: Option<String>,
     pub email: Option<String>,
     pub groups: Option<Vec<String>>,
+    pub check_groups: Option<Vec<String>>,
 }
 
 #[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
@@ -217,6 +218,7 @@ pub struct PinglowUserBindingSpec {
 pub struct ApiKeyBindingSpec {
     pub role: UserRole,
     pub secret_name: Option<String>,
+    pub check_groups: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, ToSchema, PartialEq, Eq)]
@@ -431,9 +433,11 @@ mod tests {
         let binding = ApiKeyBindingSpec {
             role: UserRole::Operator,
             secret_name: Some("my-secret".to_string()),
+            check_groups: Some(vec!["home".to_string()]),
         };
         assert_eq!(binding.role, UserRole::Operator);
         assert_eq!(binding.secret_name, Some("my-secret".to_string()));
+        assert_eq!(binding.check_groups, Some(vec!["home".to_string()]));
     }
 
     #[test]
@@ -441,6 +445,7 @@ mod tests {
         let binding = ApiKeyBindingSpec {
             role: UserRole::Admin,
             secret_name: None,
+            check_groups: None,
         };
         assert_eq!(binding.role, UserRole::Admin);
         assert_eq!(binding.secret_name, None);

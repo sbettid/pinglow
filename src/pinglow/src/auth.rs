@@ -30,19 +30,33 @@ use tokio::sync::RwLock;
 use crate::config::{OidcConfig, PinglowConfig};
 use pinglow_common::{ApiKeyBinding, PinglowUserBinding, UserRole};
 
-type BindingCache = Arc<RwLock<HashMap<String, HashMap<String, UserRole>>>>;
+#[derive(Clone, Debug)]
+struct BindingPermissions {
+    role: UserRole,
+    check_groups: Option<Vec<String>>,
+}
+
+type BindingCache = Arc<RwLock<HashMap<String, HashMap<String, BindingPermissions>>>>;
 type ApiKeyCache = Arc<RwLock<HashMap<String, ApiKeyCredential>>>;
 
 #[derive(Clone)]
 struct ApiKeyCredential {
     binding: String,
     role: UserRole,
+    check_groups: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "scope", content = "groups", rename_all = "snake_case")]
+pub enum CheckGroupAccess {
+    Unrestricted,
+    Included(Vec<String>),
 }
 
 #[derive(Clone)]
 pub struct AuthState {
     pub redis: RedisClient,
-    pub bindings: BindingCache,
+    bindings: BindingCache,
     api_keys: ApiKeyCache,
     pub oidc: Option<OidcConfig>,
     pub cookie_secure: bool,
@@ -53,6 +67,21 @@ pub struct AuthState {
 pub struct SessionUser {
     pub user: String,
     pub role: UserRole,
+    pub check_groups: CheckGroupAccess,
+}
+
+impl SessionUser {
+    pub fn can_access_check_group(&self, group_id: Option<&str>) -> bool {
+        if matches!(self.role, UserRole::Admin) {
+            return true;
+        }
+
+        match &self.check_groups {
+            CheckGroupAccess::Unrestricted => true,
+            CheckGroupAccess::Included(allowed_groups) => group_id
+                .is_some_and(|group_id| allowed_groups.iter().any(|allowed| allowed == group_id)),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -224,6 +253,7 @@ async fn reconcile_api_key(
                                 ApiKeyCredential {
                                     binding: binding_name.clone(),
                                     role: binding.spec.role.clone(),
+                                    check_groups: binding.spec.check_groups.clone(),
                                 },
                             );
                         }
@@ -303,7 +333,7 @@ async fn refresh_bindings(config: &PinglowConfig, state: &AuthState) -> Result<(
 }
 
 fn replace_binding(
-    cache: &mut HashMap<String, HashMap<String, UserRole>>,
+    cache: &mut HashMap<String, HashMap<String, BindingPermissions>>,
     binding: &PinglowUserBinding,
 ) {
     let name = binding.name_any();
@@ -311,7 +341,7 @@ fn replace_binding(
     insert_binding(cache, binding);
 }
 
-fn remove_binding(cache: &mut HashMap<String, HashMap<String, UserRole>>, name: &str) {
+fn remove_binding(cache: &mut HashMap<String, HashMap<String, BindingPermissions>>, name: &str) {
     for entries in cache.values_mut() {
         entries.remove(name);
     }
@@ -319,7 +349,7 @@ fn remove_binding(cache: &mut HashMap<String, HashMap<String, UserRole>>, name: 
 }
 
 fn insert_binding(
-    cache: &mut HashMap<String, HashMap<String, UserRole>>,
+    cache: &mut HashMap<String, HashMap<String, BindingPermissions>>,
     binding: &PinglowUserBinding,
 ) {
     let name = binding.name_any();
@@ -328,10 +358,13 @@ fn insert_binding(
         .flatten()
         .chain(binding.spec.groups.clone().unwrap_or_default())
     {
-        cache
-            .entry(identity)
-            .or_default()
-            .insert(name.clone(), binding.spec.role.clone());
+        cache.entry(identity).or_default().insert(
+            name.clone(),
+            BindingPermissions {
+                role: binding.spec.role.clone(),
+                check_groups: binding.spec.check_groups.clone(),
+            },
+        );
     }
 }
 
@@ -361,19 +394,54 @@ fn group_claims(claims: &Claims, claim_path: &str) -> Vec<String> {
         .collect()
 }
 
-fn resolve_role(
-    bindings: &HashMap<String, HashMap<String, UserRole>>,
+fn resolve_permissions(
+    bindings: &HashMap<String, HashMap<String, BindingPermissions>>,
     claims: &Claims,
     groups_claim: &str,
-) -> Option<UserRole> {
+) -> Option<(UserRole, Option<Vec<String>>)> {
+    // A binding can match any one of the user's subject, email, or identity-provider groups.
     let groups = group_claims(claims, groups_claim);
-    std::iter::once(claims.sub.as_str())
+    let matching_bindings: Vec<_> = std::iter::once(claims.sub.as_str())
         .chain(claims.email.as_deref())
         .chain(groups.iter().map(String::as_str))
         .filter_map(|claim| bindings.get(claim))
         .flat_map(|binding_roles| binding_roles.values())
         .cloned()
-        .max_by_key(role_priority)
+        .collect();
+    // No matching binding means the user has no Pinglow role.
+    let role = matching_bindings
+        .iter()
+        .map(|binding| &binding.role)
+        .max_by_key(|role| role_priority(role))?
+        .clone();
+
+    // Admin access is always unrestricted, regardless of any configured group allowlist.
+    if matches!(role, UserRole::Admin) {
+        return Some((role, None));
+    }
+
+    // Only bindings at the user's highest effective role contribute group access.
+    let highest_role_bindings = matching_bindings
+        .iter()
+        .filter(|binding| binding.role == role);
+    // An unscoped binding at that role makes the effective access unrestricted.
+    if highest_role_bindings
+        .clone()
+        .any(|binding| binding.check_groups.is_none())
+    {
+        return Some((role, None));
+    }
+
+    // Otherwise, combine the allowlists from all highest-role bindings.
+    let mut check_groups: Vec<_> = highest_role_bindings
+        .filter_map(|binding| binding.check_groups.as_ref())
+        .flatten()
+        .cloned()
+        .collect();
+    check_groups.sort();
+    check_groups.dedup();
+
+    Some((role, Some(check_groups)))
 }
 
 fn random_value() -> String {
@@ -455,6 +523,10 @@ async fn authenticated(request: &Request<'_>) -> Outcome<SessionUser, ()> {
             return Outcome::Success(SessionUser {
                 user: credential.binding.clone(),
                 role: credential.role.clone(),
+                check_groups: credential
+                    .check_groups
+                    .clone()
+                    .map_or(CheckGroupAccess::Unrestricted, CheckGroupAccess::Included),
             });
         }
     }
@@ -558,15 +630,17 @@ pub async fn callback(
     let claims = verify_id_token(auth_state.inner(), &discovery, &token.id_token, &nonce)
         .await
         .map_err(|_| Status::Unauthorized)?;
-    let role = {
+    let (role, check_groups) = {
         let bindings = auth_state.bindings.read().await;
-        resolve_role(&bindings, &claims, &oidc.groups_claim)
+        resolve_permissions(&bindings, &claims, &oidc.groups_claim)
     }
     .ok_or(Status::Forbidden)?;
     let session_id = random_value();
     let user = SessionUser {
         user: claims.email.unwrap_or(claims.sub),
         role,
+        check_groups: check_groups
+            .map_or(CheckGroupAccess::Unrestricted, CheckGroupAccess::Included),
     };
     let _: () = redis::cmd("SETEX")
         .arg(format!("pinglow:session:{}", session_id))
@@ -688,28 +762,119 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_role_uses_most_privileged_matching_binding() {
+    fn test_resolve_permissions_uses_highest_role_and_admin_scope() {
         let claims = test_claims(serde_json::json!({
             "groups": ["operators", "admins"]
         }));
         let bindings = HashMap::from([
             (
                 "user-123".to_string(),
-                HashMap::from([("user-binding".to_string(), UserRole::Viewer)]),
+                HashMap::from([(
+                    "user-binding".to_string(),
+                    BindingPermissions {
+                        role: UserRole::Viewer,
+                        check_groups: Some(vec!["home".to_string()]),
+                    },
+                )]),
             ),
             (
                 "operators".to_string(),
-                HashMap::from([("operator-binding".to_string(), UserRole::Operator)]),
+                HashMap::from([(
+                    "operator-binding".to_string(),
+                    BindingPermissions {
+                        role: UserRole::Operator,
+                        check_groups: Some(vec!["services".to_string()]),
+                    },
+                )]),
             ),
             (
                 "admins".to_string(),
-                HashMap::from([("admin-binding".to_string(), UserRole::Admin)]),
+                HashMap::from([(
+                    "admin-binding".to_string(),
+                    BindingPermissions {
+                        role: UserRole::Admin,
+                        check_groups: Some(vec!["restricted".to_string()]),
+                    },
+                )]),
             ),
         ]);
 
         assert_eq!(
-            resolve_role(&bindings, &claims, "groups"),
-            Some(UserRole::Admin)
+            resolve_permissions(&bindings, &claims, "groups"),
+            Some((UserRole::Admin, None))
+        );
+    }
+
+    #[test]
+    fn test_resolve_permissions_unions_highest_role_scopes() {
+        let claims = test_claims(serde_json::json!({ "groups": ["operators"] }));
+        let bindings = HashMap::from([
+            (
+                "user-123".to_string(),
+                HashMap::from([(
+                    "viewer-binding".to_string(),
+                    BindingPermissions {
+                        role: UserRole::Viewer,
+                        check_groups: None,
+                    },
+                )]),
+            ),
+            (
+                "operators".to_string(),
+                HashMap::from([
+                    (
+                        "operator-home".to_string(),
+                        BindingPermissions {
+                            role: UserRole::Operator,
+                            check_groups: Some(vec!["home".to_string()]),
+                        },
+                    ),
+                    (
+                        "operator-services".to_string(),
+                        BindingPermissions {
+                            role: UserRole::Operator,
+                            check_groups: Some(vec!["services".to_string(), "home".to_string()]),
+                        },
+                    ),
+                ]),
+            ),
+        ]);
+
+        assert_eq!(
+            resolve_permissions(&bindings, &claims, "groups"),
+            Some((
+                UserRole::Operator,
+                Some(vec!["home".to_string(), "services".to_string()])
+            ))
+        );
+    }
+
+    #[test]
+    fn test_resolve_permissions_unrestricted_highest_role_binding_wins() {
+        let claims = test_claims(serde_json::json!({ "groups": ["operators"] }));
+        let bindings = HashMap::from([(
+            "operators".to_string(),
+            HashMap::from([
+                (
+                    "operator-scoped".to_string(),
+                    BindingPermissions {
+                        role: UserRole::Operator,
+                        check_groups: Some(vec!["home".to_string()]),
+                    },
+                ),
+                (
+                    "operator-unrestricted".to_string(),
+                    BindingPermissions {
+                        role: UserRole::Operator,
+                        check_groups: None,
+                    },
+                ),
+            ]),
+        )]);
+
+        assert_eq!(
+            resolve_permissions(&bindings, &claims, "groups"),
+            Some((UserRole::Operator, None))
         );
     }
 
@@ -747,12 +912,42 @@ mod tests {
         let user = SessionUser {
             user: "alice@example.com".to_string(),
             role: UserRole::Admin,
+            check_groups: CheckGroupAccess::Unrestricted,
         };
         let json = serde_json::to_string(&user).expect("serialization failed");
         let deserialized: SessionUser =
             serde_json::from_str(&json).expect("deserialization failed");
         assert_eq!(deserialized.user, user.user);
         assert_eq!(deserialized.role, user.role);
+        assert_eq!(deserialized.check_groups, user.check_groups);
+    }
+
+    #[test]
+    fn test_legacy_session_requires_reauthentication() {
+        assert!(serde_json::from_str::<SessionUser>(
+            r#"{"user":"alice@example.com","role":"viewer"}"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn test_check_group_access_respects_scope_and_admin_bypass() {
+        let scoped_viewer = SessionUser {
+            user: "viewer@example.com".to_string(),
+            role: UserRole::Viewer,
+            check_groups: CheckGroupAccess::Included(vec!["home".to_string()]),
+        };
+        assert!(scoped_viewer.can_access_check_group(Some("home")));
+        assert!(!scoped_viewer.can_access_check_group(Some("services")));
+        assert!(!scoped_viewer.can_access_check_group(None));
+
+        let admin = SessionUser {
+            user: "admin@example.com".to_string(),
+            role: UserRole::Admin,
+            check_groups: CheckGroupAccess::Included(vec!["home".to_string()]),
+        };
+        assert!(admin.can_access_check_group(Some("services")));
+        assert!(admin.can_access_check_group(None));
     }
 
     #[test]
@@ -760,9 +955,11 @@ mod tests {
         let credential = ApiKeyCredential {
             binding: "test-binding".to_string(),
             role: UserRole::Operator,
+            check_groups: Some(vec!["home".to_string()]),
         };
         assert_eq!(credential.binding, "test-binding");
         assert_eq!(credential.role, UserRole::Operator);
+        assert_eq!(credential.check_groups, Some(vec!["home".to_string()]));
     }
 
     #[test]
@@ -777,14 +974,17 @@ mod tests {
         let admin_user = SessionUser {
             user: "admin@test.com".to_string(),
             role: UserRole::Admin,
+            check_groups: CheckGroupAccess::Included(vec!["limited".to_string()]),
         };
         let operator_user = SessionUser {
             user: "op@test.com".to_string(),
             role: UserRole::Operator,
+            check_groups: CheckGroupAccess::Unrestricted,
         };
         let viewer_user = SessionUser {
             user: "view@test.com".to_string(),
             role: UserRole::Viewer,
+            check_groups: CheckGroupAccess::Unrestricted,
         };
 
         assert!(matches!(admin_user.role, UserRole::Admin));

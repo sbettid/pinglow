@@ -19,6 +19,8 @@ metadata:
 spec:
   role: operator
   secret_name: checks-runner-api-key
+  check_groups:
+    - home-network
 ```
 
 Pinglow will generate a Kubernetes Secret in the same namespace containing the `data.API_KEY` field.
@@ -52,6 +54,7 @@ kubectl port-forward -n pinglow svc/pinglow 8000:80
 
 - **role** (required): One of `viewer`, `operator`, or `admin`.
 - **secret_name** (optional): The name of the Secret to manage. Defaults to `<binding-name>-api-key`.
+- **check_groups** (optional): Allowlist of `CheckGroup` resource names this API key can access. When omitted, the key has access to all checks. When set, ungrouped checks and checks in unlisted groups are not accessible. Admin keys always have access to all groups.
 
 ## Lifecycle
 
