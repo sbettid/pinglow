@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    auth::{self, Authenticated, Operator},
+    auth::{self, Authenticated, Operator, SessionUser},
     check::{Check, SharedPinglowChecks},
     config::PinglowConfig,
     load_single_runnable_check, notification_mute_state,
@@ -101,6 +101,24 @@ impl From<&Arc<PinglowCheck>> for SimpleCheckDto {
     }
 }
 
+fn check_group_is_accessible(user: &SessionUser, group_id: Option<&str>) -> bool {
+    user.can_access_check_group(group_id)
+}
+
+fn find_accessible_check<'a>(
+    user: &SessionUser,
+    checks: &'a HashMap<String, Arc<PinglowCheck>>,
+    target_check: &str,
+) -> Option<&'a Arc<PinglowCheck>> {
+    checks
+        .get(target_check)
+        .filter(|check| check_group_is_accessible(user, check.group_id.as_deref()))
+}
+
+fn invalid_target_check() -> status::Custom<String> {
+    status::Custom(Status::NotFound, "Invalid target check".to_owned())
+}
+
 #[derive(Serialize, ToSchema)]
 pub struct SimpleCheckResultDto {
     pub check_name: String,
@@ -128,7 +146,7 @@ pub async fn get_checks(
 
     let simple_checks_to_return: Vec<SimpleCheckDto> = runnable_checks
         .values()
-        .filter(|check| user.0.can_access_check_group(check.group_id.as_deref()))
+        .filter(|check| check_group_is_accessible(&user.0, check.group_id.as_deref()))
         .map(|check| check.into())
         .collect();
 
@@ -154,10 +172,7 @@ pub async fn get_check_status(
 ) -> Option<Json<SimpleCheckResultDto>> {
     let runnable_checks = checks.read().await;
 
-    let check = runnable_checks.get(target_check)?;
-    if !user.0.can_access_check_group(check.group_id.as_deref()) {
-        return None;
-    }
+    let check = find_accessible_check(&user.0, &runnable_checks, target_check)?;
 
     let notifications_muted = notification_mute_state(
         check.mute_notifications,
@@ -272,16 +287,11 @@ pub async fn get_check_history(
     let (page, size, offset) = validate_history_pagination(page, size)?;
     let state_changes = state_changes.unwrap_or(false);
 
-    let check = checks.read().await.get(target_check).cloned();
-    if !check
-        .as_ref()
-        .is_some_and(|check| user.0.can_access_check_group(check.group_id.as_deref()))
-    {
-        return Err(status::Custom(
-            Status::NotFound,
-            "Invalid target check".to_owned(),
-        ));
-    }
+    let runnable_checks = checks.read().await;
+    let _check = find_accessible_check(&user.0, &runnable_checks, target_check)
+        .cloned()
+        .ok_or_else(invalid_target_check)?;
+    drop(runnable_checks);
 
     let total_query = if state_changes {
         format!(
@@ -370,10 +380,7 @@ pub async fn get_performance_data(
 ) -> Option<Json<BTreeMap<DateTime<Utc>, HashMap<String, f32>>>> {
     let runnable_checks = checks.read().await;
 
-    let check = runnable_checks.get(target_check)?;
-    if !user.0.can_access_check_group(check.group_id.as_deref()) {
-        return None;
-    }
+    let _check = find_accessible_check(&user.0, &runnable_checks, target_check)?;
 
     let raw_perf_data_rows = client.query("SELECT timestamp, json_object_agg(perf_key, perf_value ORDER BY perf_key) AS perf_data FROM check_result_perf_data WHERE check_name = $1 GROUP BY timestamp ORDER BY timestamp;", &[&target_check]).await.ok()?;
 
@@ -427,16 +434,8 @@ pub async fn mute_check(
     let mut runnable_checks = checks.write().await;
 
     // Ensure we can find the target check
-    let check = runnable_checks.get(target_check).ok_or(status::Custom(
-        Status::NotFound,
-        "Invalid target check".into(),
-    ))?;
-    if !user.0.can_access_check_group(check.group_id.as_deref()) {
-        return Err(status::Custom(
-            Status::NotFound,
-            "Invalid target check".into(),
-        ));
-    }
+    let _check = find_accessible_check(&user.0, &runnable_checks, target_check)
+        .ok_or_else(invalid_target_check)?;
 
     // Prepare the patch object
     let mut patch = serde_json::json!({
@@ -527,16 +526,8 @@ pub async fn unmute_check(
     let mut runnable_checks = checks.write().await;
 
     // Ensure we can find the target check
-    let check = runnable_checks.get(target_check).ok_or(status::Custom(
-        Status::NotFound,
-        "Invalid target check".into(),
-    ))?;
-    if !user.0.can_access_check_group(check.group_id.as_deref()) {
-        return Err(status::Custom(
-            Status::NotFound,
-            "Invalid target check".into(),
-        ));
-    }
+    let _check = find_accessible_check(&user.0, &runnable_checks, target_check)
+        .ok_or_else(invalid_target_check)?;
 
     // Prepare the patch object
     let patch = serde_json::json!({
@@ -612,16 +603,9 @@ pub async fn process_check_result(
     let runnable_checks = checks.read().await;
 
     // Ensure we can find the target check
-    let check = runnable_checks.get(target_check).ok_or(status::Custom(
-        Status::NotFound,
-        "Invalid target check".into(),
-    ))?;
-    if !user.0.can_access_check_group(check.group_id.as_deref()) {
-        return Err(status::Custom(
-            Status::NotFound,
-            "Invalid target check".into(),
-        ));
-    }
+    let check = find_accessible_check(&user.0, &runnable_checks, target_check)
+        .cloned()
+        .ok_or_else(invalid_target_check)?;
 
     // Extract the inner result object
     let check_result_payload = check_result_payload.into_inner();
@@ -688,14 +672,8 @@ pub async fn schedule_now(
             format!("Error retrieving check {target_check}: {e}"),
         )
     })?;
-    if !user
-        .0
-        .can_access_check_group(definition.spec.groupRef.as_deref())
-    {
-        return Err(status::Custom(
-            Status::NotFound,
-            "Invalid target check".into(),
-        ));
+    if !check_group_is_accessible(&user.0, definition.spec.groupRef.as_deref()) {
+        return Err(invalid_target_check());
     }
     let check = load_single_runnable_check(&definition, &client, pinglow_config)
         .await
@@ -783,7 +761,51 @@ impl Modify for SecurityAddon {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::CheckGroupAccess;
     use pinglow_common::CheckResultStatus;
+
+    fn test_check(check_name: &str, group_id: Option<&str>) -> Arc<PinglowCheck> {
+        Arc::new(PinglowCheck {
+            passive: true,
+            script: None,
+            interval: None,
+            check_name: check_name.to_owned(),
+            group_id: group_id.map(str::to_owned),
+            group_name: group_id.map(str::to_owned),
+            secrets: None,
+            telegram_channels: vec![],
+            mute_notifications: None,
+            mute_notifications_until: None,
+        })
+    }
+
+    #[test]
+    fn test_find_accessible_check_applies_group_scope() {
+        let user = SessionUser {
+            user: "viewer@example.com".to_owned(),
+            role: pinglow_common::UserRole::Viewer,
+            check_groups: CheckGroupAccess::Included(vec!["home".to_owned()]),
+        };
+        let checks = HashMap::from([
+            (
+                "home-check".to_owned(),
+                test_check("home-check", Some("home")),
+            ),
+            (
+                "service-check".to_owned(),
+                test_check("service-check", Some("services")),
+            ),
+            (
+                "ungrouped-check".to_owned(),
+                test_check("ungrouped-check", None),
+            ),
+        ]);
+
+        assert!(find_accessible_check(&user, &checks, "home-check").is_some());
+        assert!(find_accessible_check(&user, &checks, "service-check").is_none());
+        assert!(find_accessible_check(&user, &checks, "ungrouped-check").is_none());
+        assert!(find_accessible_check(&user, &checks, "missing-check").is_none());
+    }
 
     #[test]
     fn test_simple_check_dto_creation() {
