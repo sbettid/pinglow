@@ -116,6 +116,8 @@ mod tests {
             script: None,
             interval: Some(60),
             check_name: "check-a".to_owned(),
+            group_id: None,
+            group_name: None,
             secrets: None,
             telegram_channels: vec![],
             mute_notifications: None,

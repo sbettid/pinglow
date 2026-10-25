@@ -83,6 +83,8 @@ pub struct SimpleCheckDto {
     pub check_name: String,
     pub passive: bool,
     pub interval: Option<u64>,
+    pub group_id: Option<String>,
+    pub group_name: Option<String>,
     //pub language: Option<ScriptLanguage>,
 }
 
@@ -92,6 +94,8 @@ impl From<&Arc<PinglowCheck>> for SimpleCheckDto {
             check_name: value.check_name.clone(),
             passive: value.passive,
             interval: value.interval,
+            group_id: value.group_id.clone(),
+            group_name: value.group_name.clone(),
             //language: value.as_ref().script.as_ref().map(|c| c.language.clone()),
         }
     }
@@ -761,6 +765,8 @@ mod tests {
             script: None,
             interval: Some(300),
             check_name: "test-check".to_string(),
+            group_id: Some("home".to_string()),
+            group_name: Some("Home".to_string()),
             secrets: None,
             telegram_channels: vec![],
             mute_notifications: None,
@@ -771,6 +777,8 @@ mod tests {
         assert_eq!(dto.check_name, "test-check");
         assert!(dto.passive);
         assert_eq!(dto.interval, Some(300));
+        assert_eq!(dto.group_id.as_deref(), Some("home"));
+        assert_eq!(dto.group_name.as_deref(), Some("Home"));
     }
 
     #[test]
@@ -780,6 +788,8 @@ mod tests {
             script: None,
             interval: Some(60),
             check_name: "active-check".to_string(),
+            group_id: None,
+            group_name: None,
             secrets: None,
             telegram_channels: vec![],
             mute_notifications: None,

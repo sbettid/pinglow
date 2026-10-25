@@ -104,3 +104,29 @@ spec:
 
 Clearly, it is possible to get notifications also for passive check results. See the [notifications](notifications) section for more
 information on how to configure them!
+
+## Grouping checks
+
+Checks can be organized into groups using `CheckGroup` resources. A group's Kubernetes name is its stable identity; checks refer to it with `groupRef`. Its `displayName` is a human-readable name that can be changed without changing that identity.
+
+```yaml
+apiVersion: pinglow.io/v1alpha1
+kind: CheckGroup
+metadata:
+  name: home-network
+  namespace: pinglow
+spec:
+  displayName: Home network
+---
+apiVersion: pinglow.io/v1alpha1
+kind: Check
+metadata:
+  name: router-reachability
+  namespace: pinglow
+spec:
+  groupRef: home-network
+  scriptRef: check-router
+  interval: 300
+```
+
+Checks may omit `groupRef` if they do not belong to a group. Grouping is organizational metadata and does not restrict API access.

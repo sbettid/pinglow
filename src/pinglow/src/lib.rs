@@ -10,7 +10,7 @@ use log::error;
 use tokio_postgres::Client as PostgresClient;
 
 use crate::{
-    check::{Check, TelegramChannel},
+    check::{Check, CheckGroup, TelegramChannel},
     config::PinglowConfig,
     error::ReconcileError,
 };
@@ -51,6 +51,7 @@ pub async fn load_single_runnable_check(
 
     let telegram_channels_api: Api<TelegramChannel> =
         Api::namespaced(client.clone(), &config.target_namespace);
+    let check_groups: Api<CheckGroup> = Api::namespaced(client.clone(), &config.target_namespace);
 
     // Get the script name from the check specification
     let script_name = &check.spec.scriptRef;
@@ -61,6 +62,21 @@ pub async fn load_single_runnable_check(
         .name
         .clone()
         .unwrap_or("Unnamed check".to_string());
+    let group_id = check.spec.groupRef.clone();
+    let group_name = if let Some(group_id) = &group_id {
+        check_groups
+            .get_opt(group_id)
+            .await
+            .map_err(|e| {
+                ReconcileError::GeneralError(format!(
+                    "Error retrieving check group {group_id}: {e}"
+                ))
+            })?
+            .map(|group| group.spec.displayName)
+            .or_else(|| Some(group_id.clone()))
+    } else {
+        None
+    };
 
     // Retrieve the corresponding script
     let mut script = None;
@@ -120,6 +136,8 @@ pub async fn load_single_runnable_check(
         script: script.map(|s| s.spec),
         interval: check.spec.interval,
         check_name,
+        group_id,
+        group_name,
         secrets,
         telegram_channels,
         mute_notifications: check.spec.muteNotifications,

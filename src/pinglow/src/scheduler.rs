@@ -221,6 +221,7 @@ mod tests {
                 telegramChannelRefs: None,
                 muteNotifications: None,
                 muteNotificationsUntil: None,
+                groupRef: None,
                 passive,
             },
         ))
@@ -232,6 +233,8 @@ mod tests {
             script: None,
             interval: Some(60),
             check_name: name.to_owned(),
+            group_id: None,
+            group_name: None,
             secrets: None,
             telegram_channels: vec![],
             mute_notifications: None,

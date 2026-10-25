@@ -37,6 +37,35 @@ spec:
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
+  name: checkgroups.pinglow.io
+spec:
+  group: pinglow.io
+  names:
+    plural: checkgroups
+    singular: checkgroup
+    kind: CheckGroup
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [displayName]
+              properties:
+                displayName:
+                  type: string
+                  minLength: 1
+                  description: Human-readable name shown for the group in the UI.
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
   name: apikeybindings.pinglow.io
 spec:
   group: pinglow.io
@@ -134,6 +163,9 @@ spec:
                 interval:
                   type: integer
                   description: "Interval at which to run the check, in seconds"
+                groupRef:
+                  type: string
+                  description: Name of the CheckGroup resource to display this check under.
                 secretRefs:
                   type: array
                   items:

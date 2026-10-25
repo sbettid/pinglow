@@ -37,6 +37,7 @@ pub struct TelegramChannelSpec {
 #[kube(group = "pinglow.io", version = "v1alpha1", kind = "Check", namespaced)]
 #[allow(non_snake_case)]
 pub struct CheckSpec {
+    pub groupRef: Option<String>,
     pub scriptRef: Option<String>,
     pub interval: Option<u64>,
     pub secretRefs: Option<Vec<String>>,
@@ -44,6 +45,18 @@ pub struct CheckSpec {
     pub muteNotifications: Option<bool>,
     pub muteNotificationsUntil: Option<DateTime<Utc>>,
     pub passive: bool,
+}
+
+#[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
+#[kube(
+    group = "pinglow.io",
+    version = "v1alpha1",
+    kind = "CheckGroup",
+    namespaced
+)]
+#[allow(non_snake_case)]
+pub struct CheckGroupSpec {
+    pub displayName: String,
 }
 
 #[cfg(test)]
