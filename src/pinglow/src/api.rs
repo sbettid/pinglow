@@ -121,13 +121,16 @@ pub struct SimpleCheckResultDto {
 )]
 #[get("/checks")]
 pub async fn get_checks(
-    _user: Authenticated,
+    user: Authenticated,
     checks: &State<SharedPinglowChecks>,
 ) -> Json<Vec<SimpleCheckDto>> {
     let runnable_checks = checks.read().await;
 
-    let simple_checks_to_return: Vec<SimpleCheckDto> =
-        runnable_checks.iter().map(|check| check.1.into()).collect();
+    let simple_checks_to_return: Vec<SimpleCheckDto> = runnable_checks
+        .values()
+        .filter(|check| user.0.can_access_check_group(check.group_id.as_deref()))
+        .map(|check| check.into())
+        .collect();
 
     Json(simple_checks_to_return)
 }
@@ -144,16 +147,17 @@ pub async fn get_checks(
 )]
 #[get("/check-status/<target_check>")]
 pub async fn get_check_status(
-    _user: Authenticated,
+    user: Authenticated,
     checks: &State<SharedPinglowChecks>,
     client: &State<Arc<Client>>,
     target_check: &str,
 ) -> Option<Json<SimpleCheckResultDto>> {
     let runnable_checks = checks.read().await;
 
-    let (_, check) = runnable_checks
-        .iter()
-        .find(|&check| check.0 == target_check)?;
+    let check = runnable_checks.get(target_check)?;
+    if !user.0.can_access_check_group(check.group_id.as_deref()) {
+        return None;
+    }
 
     let notifications_muted = notification_mute_state(
         check.mute_notifications,
@@ -257,7 +261,7 @@ const STATE_CHANGE_FILTER: &str = "older_status IS NULL OR status <> older_statu
 )]
 #[get("/check-history/<target_check>?<page>&<size>&<state_changes>")]
 pub async fn get_check_history(
-    _user: Authenticated,
+    user: Authenticated,
     checks: &State<SharedPinglowChecks>,
     client: &State<Arc<Client>>,
     target_check: &str,
@@ -268,7 +272,11 @@ pub async fn get_check_history(
     let (page, size, offset) = validate_history_pagination(page, size)?;
     let state_changes = state_changes.unwrap_or(false);
 
-    if !checks.read().await.contains_key(target_check) {
+    let check = checks.read().await.get(target_check).cloned();
+    if !check
+        .as_ref()
+        .is_some_and(|check| user.0.can_access_check_group(check.group_id.as_deref()))
+    {
         return Err(status::Custom(
             Status::NotFound,
             "Invalid target check".to_owned(),
@@ -355,16 +363,17 @@ struct GroupedPerfData {
 )]
 #[get("/performance-data/<target_check>")]
 pub async fn get_performance_data(
-    _user: Authenticated,
+    user: Authenticated,
     checks: &State<SharedPinglowChecks>,
     client: &State<Arc<Client>>,
     target_check: &str,
 ) -> Option<Json<BTreeMap<DateTime<Utc>, HashMap<String, f32>>>> {
     let runnable_checks = checks.read().await;
 
-    runnable_checks
-        .iter()
-        .find(|&check| check.0 == target_check)?;
+    let check = runnable_checks.get(target_check)?;
+    if !user.0.can_access_check_group(check.group_id.as_deref()) {
+        return None;
+    }
 
     let raw_perf_data_rows = client.query("SELECT timestamp, json_object_agg(perf_key, perf_value ORDER BY perf_key) AS perf_data FROM check_result_perf_data WHERE check_name = $1 GROUP BY timestamp ORDER BY timestamp;", &[&target_check]).await.ok()?;
 
@@ -408,7 +417,7 @@ pub async fn get_performance_data(
 )]
 #[put("/check/<target_check>/mute?<until>")]
 pub async fn mute_check(
-    _user: Operator,
+    user: Operator,
     checks: &State<SharedPinglowChecks>,
     pinglow_config: &State<PinglowConfig>,
     target_check: &str,
@@ -418,13 +427,16 @@ pub async fn mute_check(
     let mut runnable_checks = checks.write().await;
 
     // Ensure we can find the target check
-    runnable_checks
-        .iter()
-        .find(|&check| check.0 == target_check)
-        .ok_or(status::Custom(
+    let check = runnable_checks.get(target_check).ok_or(status::Custom(
+        Status::NotFound,
+        "Invalid target check".into(),
+    ))?;
+    if !user.0.can_access_check_group(check.group_id.as_deref()) {
+        return Err(status::Custom(
             Status::NotFound,
             "Invalid target check".into(),
-        ))?;
+        ));
+    }
 
     // Prepare the patch object
     let mut patch = serde_json::json!({
@@ -506,7 +518,7 @@ pub async fn mute_check(
 )]
 #[delete("/check/<target_check>/mute")]
 pub async fn unmute_check(
-    _user: Operator,
+    user: Operator,
     checks: &State<SharedPinglowChecks>,
     pinglow_config: &State<PinglowConfig>,
     target_check: &str,
@@ -515,13 +527,16 @@ pub async fn unmute_check(
     let mut runnable_checks = checks.write().await;
 
     // Ensure we can find the target check
-    runnable_checks
-        .iter()
-        .find(|&check| check.0 == target_check)
-        .ok_or(status::Custom(
+    let check = runnable_checks.get(target_check).ok_or(status::Custom(
+        Status::NotFound,
+        "Invalid target check".into(),
+    ))?;
+    if !user.0.can_access_check_group(check.group_id.as_deref()) {
+        return Err(status::Custom(
             Status::NotFound,
             "Invalid target check".into(),
-        ))?;
+        ));
+    }
 
     // Prepare the patch object
     let patch = serde_json::json!({
@@ -587,7 +602,7 @@ pub struct ProcessCheckResultPayload {
 )]
 #[post("/check/<target_check>/result", data = "<check_result_payload>")]
 pub async fn process_check_result(
-    _user: Operator,
+    user: Operator,
     checks: &State<SharedPinglowChecks>,
     client: &State<Arc<Client>>,
     target_check: &str,
@@ -597,13 +612,16 @@ pub async fn process_check_result(
     let runnable_checks = checks.read().await;
 
     // Ensure we can find the target check
-    let (_check_name, check) = runnable_checks
-        .iter()
-        .find(|&check| check.0 == target_check)
-        .ok_or(status::Custom(
+    let check = runnable_checks.get(target_check).ok_or(status::Custom(
+        Status::NotFound,
+        "Invalid target check".into(),
+    ))?;
+    if !user.0.can_access_check_group(check.group_id.as_deref()) {
+        return Err(status::Custom(
             Status::NotFound,
             "Invalid target check".into(),
-        ))?;
+        ));
+    }
 
     // Extract the inner result object
     let check_result_payload = check_result_payload.into_inner();
@@ -649,7 +667,7 @@ pub async fn process_check_result(
 )]
 #[post("/check/<target_check>/schedule-now")]
 pub async fn schedule_now(
-    _user: Operator,
+    user: Operator,
     pinglow_config: &State<PinglowConfig>,
     target_check: &str,
 ) -> Result<(), status::Custom<String>> {
@@ -670,6 +688,15 @@ pub async fn schedule_now(
             format!("Error retrieving check {target_check}: {e}"),
         )
     })?;
+    if !user
+        .0
+        .can_access_check_group(definition.spec.groupRef.as_deref())
+    {
+        return Err(status::Custom(
+            Status::NotFound,
+            "Invalid target check".into(),
+        ));
+    }
     let check = load_single_runnable_check(&definition, &client, pinglow_config)
         .await
         .map(Arc::new)
