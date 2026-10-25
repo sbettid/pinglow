@@ -399,6 +399,7 @@ fn resolve_permissions(
     claims: &Claims,
     groups_claim: &str,
 ) -> Option<(UserRole, Option<Vec<String>>)> {
+    // A binding can match any one of the user's subject, email, or identity-provider groups.
     let groups = group_claims(claims, groups_claim);
     let matching_bindings: Vec<_> = std::iter::once(claims.sub.as_str())
         .chain(claims.email.as_deref())
@@ -407,19 +408,23 @@ fn resolve_permissions(
         .flat_map(|binding_roles| binding_roles.values())
         .cloned()
         .collect();
+    // No matching binding means the user has no Pinglow role.
     let role = matching_bindings
         .iter()
         .map(|binding| &binding.role)
         .max_by_key(|role| role_priority(role))?
         .clone();
 
+    // Admin access is always unrestricted, regardless of any configured group allowlist.
     if matches!(role, UserRole::Admin) {
         return Some((role, None));
     }
 
+    // Only bindings at the user's highest effective role contribute group access.
     let highest_role_bindings = matching_bindings
         .iter()
         .filter(|binding| binding.role == role);
+    // An unscoped binding at that role makes the effective access unrestricted.
     if highest_role_bindings
         .clone()
         .any(|binding| binding.check_groups.is_none())
@@ -427,6 +432,7 @@ fn resolve_permissions(
         return Some((role, None));
     }
 
+    // Otherwise, combine the allowlists from all highest-role bindings.
     let mut check_groups: Vec<_> = highest_role_bindings
         .filter_map(|binding| binding.check_groups.as_ref())
         .flatten()
