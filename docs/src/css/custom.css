@@ -6,6 +6,10 @@
 
 /* You can override the default Infima variables here. */
 :root {
+  --color-primary-base: #31c0df;
+  --sidebar-width: 0px;
+  --text-color-primary: #1c1e21;
+  --text-color-secondary: #586069;
   --ifm-color-primary: #31c0df;
   --ifm-color-primary-dark: #31c0df;
   --ifm-color-primary-darker: #31c0df;
@@ -19,6 +23,8 @@
 
 /* For readability concerns, you should choose a lighter palette in dark mode. */
 [data-theme='dark'] {
+  --text-color-primary: #ffffff;
+  --text-color-secondary: #cccccc;
   --ifm-color-primary: #31c0df;
   --ifm-color-primary-dark: #31c0df;
   --ifm-color-primary-darker: #31c0df;
@@ -48,4 +54,8 @@ footer {
 
 a[href="https://redocly.com/redoc/"] {
   opacity: 0;
+}
+
+.redocApiDocs [data-testid='color-mode-switcher'] {
+  display: none !important;
 }

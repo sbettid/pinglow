@@ -24,6 +24,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
@@ -43,4 +48,3 @@ jobs:
       - name: Build the doc
         working-directory: docs
         run: npm run build
-
