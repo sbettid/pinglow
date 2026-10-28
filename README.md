@@ -22,6 +22,12 @@ Manage checks, scripts, and notification channels alongside the rest of your Kub
 
 Pinglow is written in Rust and developed in my free time. It is an evolving project, and contributions, ideas, and feedback are always welcome.
 
+## Web interface
+
+The [Pinglow web frontend](https://github.com/sbettid/pinglow-frontend) can also be deployed to explore check status and performance data (and much more actually!): 
+
+![Pinglow web frontend home screen](docs/static/img/screenshots/home.png)
+
 ## 🚀 Take a look
 
 Curious to see it in action? Start with the **[quick start](https://sbettid.github.io/pinglow/docs/deployment/quick-start)**, explore the **[full documentation](https://sbettid.github.io/pinglow/)**, or visit the **[frontend project](https://github.com/sbettid/pinglow-frontend)**. 

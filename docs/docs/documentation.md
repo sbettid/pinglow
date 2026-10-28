@@ -9,4 +9,10 @@ Pinglow is a prototype of a Kubernetes ready monitoring engine. It is a toy proj
 The core idea is to allow defining the core components, such as checks, scripts and notification channels through Custom
 Resources, running the checks inside one or more runners, with optional auto-scaling capabilities.
 
-Pinglow is written in Rust and provides also a Helm Chart for a faster deployment. 
+Pinglow is written in Rust and provides also a Helm Chart for a faster deployment.
+
+## Web interface
+
+The [Pinglow frontend](https://github.com/sbettid/pinglow-frontend) provides a web interface for exploring check statuses and performance data.
+
+![Pinglow web frontend home screen](/img/screenshots/home.png)
