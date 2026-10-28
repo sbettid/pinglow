@@ -20,11 +20,17 @@
       "rangeStrategy": "bump"
     },
     {
-      "matchPackageNames": [
+      "matchPackagePrefixes": [
         "kube",
-        "k8s-openapi"
+        "k8s",
+        "kopium",
+        "envtest",
+        "schemars"
       ],
-      "groupName": "kube-deps"
+      "groupName": "kubernetes crates",
+      "matchManagers": [
+        "cargo"
+      ]
     }
   ]
 }
