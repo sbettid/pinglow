@@ -14,6 +14,12 @@
   ],
   "packageRules": [
     {
+      "matchManagers": [
+        "cargo"
+      ],
+      "rangeStrategy": "bump"
+    },
+    {
       "matchPackageNames": [
         "kube",
         "k8s-openapi"
