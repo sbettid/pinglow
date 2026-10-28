@@ -19,7 +19,7 @@
     "@docusaurus/faster": "^3.10.1",
     "@docusaurus/preset-classic": "^3.9.1",
     "@mdx-js/react": "^3.0.0",
-    "@redocly/config": "^0.65.0",
+    "@redocly/config": "^0.69.0",
     "clsx": "^2.0.0",
     "prism-react-renderer": "^2.3.0",
     "react": "^19.0.0",
