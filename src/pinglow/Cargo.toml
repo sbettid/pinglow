@@ -44,15 +44,15 @@ urlencoding.workspace = true
 thiserror.workspace = true
 env_logger.workspace = true
 
-futures = "0.3"
+futures = "0.3.34"
 refinery = {version = "0.10", features = ["tokio-postgres"]}
-rocket = { version = "0.5", features = ["json"] }
-reqwest = { version = "0.13", default-features = false, features = ["form", "json", "native-tls-vendored", "http2", "charset", "multipart"] }
+rocket = { version = "0.5.2", features = ["json"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["form", "json", "native-tls-vendored", "http2", "charset", "multipart"] }
 
-dashmap = "6.1.0"
+dashmap = "6.2.1"
 html-escape = "0.3"
 
-base64 = "0.23"
+base64 = "0.23.1"
 
 [dev-dependencies]
 rustfmt = "0.10.0"
