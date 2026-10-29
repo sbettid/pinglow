@@ -3,6 +3,9 @@
 redis:
   # Empty generates and uses automatically a Secret named pinglow-redis-password.
   secretName: ""
+  persistence:
+    enabled: true
+    size: 1Gi
 
 # Pinglow controller configuration
 pinglow:

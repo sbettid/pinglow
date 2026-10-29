@@ -40,6 +40,7 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
+  {{- if .Values.redis.persistence.enabled }}
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -47,7 +48,12 @@ spec:
         accessModes: ["ReadWriteOnce"]
         resources:
           requests:
-            storage: 1Gi
+            storage: {{ .Values.redis.persistence.size }}
+  {{- else }}
+      volumes:
+        - name: data
+          emptyDir: {}
+  {{- end }}
 ---
 apiVersion: v1
 kind: Service
