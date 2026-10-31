@@ -20,7 +20,7 @@ serde = { version = "1.0.229", features = ["derive", "rc"] }
 schemars = {version = "1.2.3", features = ["chrono04"]}
 chrono = {version = "0.4.45", features = ["serde"]}
 tokio-postgres = {version = "0.7.18", features = ["with-chrono-0_4", "with-serde_json-1"]}
-log = {version = "0.4.34"}
+log = {version = "0.4.35"}
 anyhow = "1.0.104"
 kube = { version = "4", features = ["derive", "runtime"] }
 serde_json = "1.0.154"
