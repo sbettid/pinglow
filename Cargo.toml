@@ -22,7 +22,7 @@ chrono = {version = "0.4.45", features = ["serde"]}
 tokio-postgres = {version = "0.7.18", features = ["with-chrono-0_4", "with-serde_json-1"]}
 log = {version = "0.4.35"}
 anyhow = "1.0.104"
-kube = { version = "4", features = ["derive", "runtime"] }
+kube = { version = "5.0.0", features = ["derive", "runtime"] }
 serde_json = "1.0.154"
 k8s-openapi = { version = "0.28", features = ["latest", "schemars"] }
 tokio = { version = "1.54.1", features = ["full"] }
