@@ -23,10 +23,12 @@ spec:
             - name: runner-writable
               mountPath: /home/pinglow-runner
               readOnly: false
-          envFrom:
-            - secretRef:
-                name: {{ include "pinglow.redis.secretName" . }}
-          env: 
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pinglow.redis.secretName" . }}
+                  key: REDIS_PASSWORD
             - name: REDIS_HOST
               value: "redis"
             - name: RUNNER_NAME

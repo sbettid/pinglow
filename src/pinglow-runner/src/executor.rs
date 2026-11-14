@@ -5,6 +5,13 @@ use anyhow::{bail, Error};
 use chrono::Utc;
 use pinglow_common::{CheckResult, CheckResultStatus, PinglowCheck};
 
+fn clear_child_env(command: &mut Command) {
+    command.env_clear();
+    if let Some(path) = std::env::var_os("PATH") {
+        command.env("PATH", path);
+    }
+}
+
 pub async fn execute_check(check: PinglowCheck, base_path: &str) -> Result<CheckResult, Error> {
     // Get the script
     let script = check
@@ -24,7 +31,9 @@ pub async fn execute_check(check: PinglowCheck, base_path: &str) -> Result<Check
     fs::write(&script_path, &script.content)?;
 
     // Create the venv
-    let output = Command::new("python3")
+    let mut command = Command::new("python3");
+    clear_child_env(&mut command);
+    let output = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .args(["-m", "venv", &venv_path])
@@ -46,7 +55,9 @@ pub async fn execute_check(check: PinglowCheck, base_path: &str) -> Result<Check
         let mut args = vec!["install"];
         args.extend(reqs.iter().map(|s| s.as_str()));
 
-        let output = Command::new(format!("{venv_path}/bin/pip"))
+        let mut command = Command::new(format!("{venv_path}/bin/pip"));
+        clear_child_env(&mut command);
+        let output = command
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .args(args)
@@ -66,6 +77,7 @@ pub async fn execute_check(check: PinglowCheck, base_path: &str) -> Result<Check
 
     // Run check in the venv
     let mut command = Command::new(format!("{venv_path}/bin/python"));
+    clear_child_env(&mut command);
     command.arg(script_path).stdout(Stdio::piped());
 
     // Check if we have secrets
@@ -99,4 +111,36 @@ pub async fn execute_check(check: PinglowCheck, base_path: &str) -> Result<Check
     };
 
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clear_child_env;
+    use std::process::Command;
+
+    #[test]
+    fn child_environment_excludes_runner_secrets_and_keeps_check_secrets() {
+        let mut command = Command::new("env");
+        command.env("REDIS_PASSWORD", "runner-secret");
+        command.env("REDIS_HOST", "redis");
+        clear_child_env(&mut command);
+        command.env("CHECK_TOKEN", "check-secret");
+
+        let output = command
+            .output()
+            .expect("failed to inspect child environment");
+        assert!(output.status.success());
+
+        let environment = String::from_utf8_lossy(&output.stdout);
+        assert!(!environment
+            .lines()
+            .any(|line| line.starts_with("REDIS_PASSWORD=")));
+        assert!(!environment
+            .lines()
+            .any(|line| line.starts_with("REDIS_HOST=")));
+        assert!(environment
+            .lines()
+            .any(|line| line == "CHECK_TOKEN=check-secret"));
+        assert!(environment.lines().any(|line| line.starts_with("PATH=")));
+    }
 }
