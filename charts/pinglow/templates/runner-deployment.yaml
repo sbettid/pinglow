@@ -12,11 +12,23 @@ spec:
       labels:
         app: {{ .Release.Name }}-runner
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 10000
       containers:
         - name: {{ .Release.Name }}-runner
           image: "ghcr.io/sbettid/{{ .Release.Name }}-runner:{{ .Chart.AppVersion }}"
           securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - SETUID
             readOnlyRootFilesystem: true
+            runAsGroup: 10000
+            runAsNonRoot: true
+            runAsUser: 10000
           resources:
             {{- toYaml .Values.runner.resources | nindent 12 }}
           volumeMounts:

@@ -20,6 +20,7 @@ All the options of the chart, with their defaults, as found in `charts/pinglow/v
 ## Runner (`runner`)
 
 The runners execute the checks. Their number is only adjusted automatically when `keda.enabled=true`; otherwise `minReplicas` replicas are run.
+The chart runs the runner as UID/GID `10000` and grants it `SETUID` so check processes can run as UID `65534`. Clusters with Pod Security policies must allow this capability for the runner.
 
 | Value | Default | Description |
 | --- | --- | --- |
