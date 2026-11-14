@@ -9,8 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
-RUN addgroup --system pinglow-runner && \
-    adduser --system --ingroup pinglow-runner --home /home/pinglow-runner pinglow-runner
+RUN addgroup --system --gid 10000 pinglow-runner && \
+    adduser --system --uid 10000 --ingroup pinglow-runner --home /home/pinglow-runner pinglow-runner
 
 COPY --from=bin_amd64 ${BINARY_NAME} /usr/local/bin/pinglow-runner
 COPY --from=bin_arm64 ${BINARY_NAME} /usr/local/bin/pinglow-runner
