@@ -1,11 +1,14 @@
 use std::{
     collections::{BTreeMap, HashMap},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
 use crate::{
-    auth::{self, Authenticated, Operator, SessionUser},
+    auth::{self, AgentApiKey, Authenticated, Operator, SessionUser},
     check::{Check, SharedPinglowChecks},
     config::PinglowConfig,
     load_single_runnable_check, notification_mute_state,
@@ -15,14 +18,17 @@ use chrono::{DateTime, FixedOffset, Utc};
 use kube::{Api, Client as KubeClient};
 use log::warn;
 use pinglow_common::{
-    redis::redis_client, CheckResult, CheckResultStatus, PinglowCheck, ScriptLanguage,
+    redis::{check_stream_for_target, redis_client},
+    CheckResult, CheckResultStatus, PinglowCheck, ScriptLanguage,
 };
+use redis::{Client as RedisClient, Value as RedisValue};
 use rocket::{
     delete, get, http::Status, post, put, response::status, routes, serde::json::Json, Rocket,
     Shutdown, State,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tokio::time::{sleep, Instant};
 use tokio_postgres::Client;
 use utoipa::{
     openapi::security::{ApiKeyValue, SecurityScheme},
@@ -36,6 +42,10 @@ pub async fn start_rocket(
 ) -> Result<(Rocket<rocket::Ignite>, Shutdown), Box<dyn std::error::Error + Send + Sync>> {
     let redis = redis_client()?;
     let auth_state = auth::create_auth_state(&pinglow_config, redis).await?;
+    let gateway_state = AgentGatewayState {
+        redis: auth_state.redis.clone(),
+        next_target_index: Arc::new(AtomicUsize::new(0)),
+    };
     tokio::spawn(auth::watch_bindings(
         pinglow_config.clone(),
         auth_state.clone(),
@@ -53,6 +63,7 @@ pub async fn start_rocket(
         .manage(shared_checks)
         .manage(client)
         .manage(auth_state)
+        .manage(gateway_state)
         .mount(
             "/",
             routes![
@@ -67,7 +78,9 @@ pub async fn start_rocket(
                 mute_check,
                 unmute_check,
                 process_check_result,
-                schedule_now
+                schedule_now,
+                agent_next_job,
+                agent_submit_result
             ],
         );
 
@@ -76,6 +89,330 @@ pub async fn start_rocket(
     let shutdown = rocket.shutdown();
 
     Ok((rocket, shutdown))
+}
+
+#[derive(Clone)]
+struct AgentGatewayState {
+    redis: RedisClient,
+    next_target_index: Arc<AtomicUsize>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentJob {
+    id: String,
+    target: String,
+    expires_at: DateTime<Utc>,
+    check: PinglowCheck,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentResultPayload {
+    #[serde(default)]
+    target: Option<String>,
+    check_name: String,
+    output: String,
+    status: CheckResultStatus,
+    timestamp: DateTime<Utc>,
+}
+
+#[post("/agent/jobs/next")]
+async fn agent_next_job(
+    agent: AgentApiKey,
+    state: &State<AgentGatewayState>,
+) -> Result<Json<AgentJob>, Status> {
+    let streams: Vec<(String, String)> = agent
+        .targets
+        .iter()
+        .map(|target| {
+            let run_on = format!("agent/{target}");
+            let stream = check_stream_for_target(&run_on).ok_or(Status::BadRequest)?;
+            Ok((target.clone(), stream))
+        })
+        .collect::<Result<_, Status>>()?;
+    if streams.is_empty() {
+        return Err(Status::Forbidden);
+    }
+
+    let mut connection = state
+        .redis
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|_| Status::ServiceUnavailable)?;
+
+    for (target, stream) in &streams {
+        match redis::cmd("XGROUP")
+            .arg("CREATE")
+            .arg(stream)
+            .arg("agents")
+            .arg("0")
+            .arg("MKSTREAM")
+            .query_async::<()>(&mut connection)
+            .await
+        {
+            Ok(()) => {}
+            Err(error) if error.to_string().contains("BUSYGROUP") => {}
+            Err(error) => {
+                log::error!("Failed to create stream group for {target}: {error}");
+                return Err(Status::ServiceUnavailable);
+            }
+        }
+    }
+
+    let consumer = format!("agent-{}", agent.binding);
+    let initial_target = state.next_target_index.fetch_add(1, Ordering::Relaxed) % streams.len();
+    for offset in 0..streams.len() {
+        let (target, stream) = &streams[(initial_target + offset) % streams.len()];
+        if let Some((id, fields)) = claim_agent_job(
+            &mut connection,
+            stream,
+            &consumer,
+            &format!("agent/{target}"),
+        )
+        .await
+        .map_err(|error| {
+            log::error!("Failed to recover pending job for agent target {target}: {error}");
+            Status::ServiceUnavailable
+        })? {
+            return agent_job_response(id, fields, target);
+        }
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let start = state.next_target_index.fetch_add(1, Ordering::Relaxed) % streams.len();
+        for offset in 0..streams.len() {
+            let (target, stream) = &streams[(start + offset) % streams.len()];
+            let response: Option<RedisValue> = redis::cmd("XREADGROUP")
+                .arg("GROUP")
+                .arg("agents")
+                .arg(&consumer)
+                .arg("COUNT")
+                .arg(1)
+                .arg("STREAMS")
+                .arg(stream)
+                .arg(">")
+                .query_async(&mut connection)
+                .await
+                .map_err(|error| {
+                    log::error!("Failed to read agent queue for {target}: {error}");
+                    Status::ServiceUnavailable
+                })?;
+            if let Some(value) = response {
+                let (id, fields) = pinglow_common::redis::parse_stream_payload(value)
+                    .ok_or(Status::InternalServerError)?;
+                return agent_job_response(id, fields, target);
+            }
+        }
+
+        if Instant::now() >= deadline {
+            return Err(Status::NoContent);
+        }
+        sleep(Duration::from_millis(200)).await;
+    }
+}
+
+fn agent_job_response(
+    id: String,
+    fields: HashMap<String, String>,
+    target: &str,
+) -> Result<Json<AgentJob>, Status> {
+    let payload = fields.get("payload").ok_or(Status::InternalServerError)?;
+    let mut check: PinglowCheck =
+        serde_json::from_str(payload).map_err(|_| Status::InternalServerError)?;
+    if check.run_on != format!("agent/{target}") {
+        return Err(Status::InternalServerError);
+    }
+    let expires_at = check.expires_at.ok_or(Status::InternalServerError)?;
+    check.telegram_channels.clear();
+    Ok(Json(AgentJob {
+        id,
+        target: target.to_owned(),
+        expires_at,
+        check,
+    }))
+}
+
+async fn claim_agent_job(
+    connection: &mut redis::aio::MultiplexedConnection,
+    stream: &str,
+    consumer: &str,
+    target: &str,
+) -> anyhow::Result<Option<(String, HashMap<String, String>)>> {
+    let response: RedisValue = redis::cmd("XAUTOCLAIM")
+        .arg(stream)
+        .arg("agents")
+        .arg(consumer)
+        .arg(3660000)
+        .arg("0-0")
+        .arg("COUNT")
+        .arg(1)
+        .query_async(connection)
+        .await?;
+    let RedisValue::Array(parts) = response else {
+        anyhow::bail!("Invalid XAUTOCLAIM response");
+    };
+    let Some(RedisValue::Array(entries)) = parts.get(1) else {
+        anyhow::bail!("Invalid XAUTOCLAIM entries");
+    };
+    let Some(entry) = entries.first() else {
+        return Ok(None);
+    };
+    let (id, fields) = parse_stream_entry(entry.clone())?;
+    let payload = fields
+        .get("payload")
+        .ok_or_else(|| anyhow::anyhow!("Missing task payload"))?;
+    let check: PinglowCheck = serde_json::from_str(payload)?;
+    if check.run_on != target {
+        anyhow::bail!("Recovered task does not belong to this agent");
+    }
+    Ok(Some((id, fields)))
+}
+
+fn parse_stream_entry(value: RedisValue) -> anyhow::Result<(String, HashMap<String, String>)> {
+    let RedisValue::Array(entry) = value else {
+        anyhow::bail!("Invalid Redis stream entry");
+    };
+    let Some(RedisValue::BulkString(id)) = entry.first() else {
+        anyhow::bail!("Missing Redis stream entry id");
+    };
+    let id = String::from_utf8_lossy(id).into_owned();
+    let Some(RedisValue::Array(fields)) = entry.get(1) else {
+        anyhow::bail!("Missing Redis stream entry fields");
+    };
+    let mut map = HashMap::new();
+    let mut iter = fields.iter();
+    while let (Some(RedisValue::BulkString(key)), Some(RedisValue::BulkString(value))) =
+        (iter.next(), iter.next())
+    {
+        map.insert(
+            String::from_utf8_lossy(key).into_owned(),
+            String::from_utf8_lossy(value).into_owned(),
+        );
+    }
+    Ok((id, map))
+}
+
+#[post("/agent/jobs/<job_id>/result", data = "<payload>")]
+async fn agent_submit_result(
+    agent: AgentApiKey,
+    state: &State<AgentGatewayState>,
+    job_id: &str,
+    payload: Json<AgentResultPayload>,
+) -> Result<(), status::Custom<String>> {
+    let payload = payload.into_inner();
+    let target = resolve_agent_result_target(payload.target, &agent.targets).map_err(|status| {
+        let message = match status {
+            Status::BadRequest => "Result target is required for a multi-target agent",
+            _ => "Agent is not authorized for this target",
+        };
+        status::Custom(status, message.to_owned())
+    })?;
+    let run_on = format!("agent/{target}");
+    let stream = check_stream_for_target(&run_on)
+        .ok_or_else(|| status::Custom(Status::BadRequest, "Invalid agent target".to_owned()))?;
+    let mut connection = state
+        .redis
+        .get_multiplexed_async_connection()
+        .await
+        .map_err(|error| {
+            status::Custom(
+                Status::ServiceUnavailable,
+                format!("Cannot connect to job queue: {error}"),
+            )
+        })?;
+    let entries: RedisValue = redis::cmd("XRANGE")
+        .arg(&stream)
+        .arg(job_id)
+        .arg(job_id)
+        .query_async(&mut connection)
+        .await
+        .map_err(|error| status::Custom(Status::InternalServerError, error.to_string()))?;
+    let RedisValue::Array(entries) = entries else {
+        return Err(status::Custom(
+            Status::NotFound,
+            "Job does not exist".to_owned(),
+        ));
+    };
+    let Some(entry) = entries.first() else {
+        return Err(status::Custom(
+            Status::NotFound,
+            "Job does not exist".to_owned(),
+        ));
+    };
+    let (_, fields) = parse_stream_entry(entry.clone())
+        .map_err(|error| status::Custom(Status::InternalServerError, error.to_string()))?;
+    let queued_check: PinglowCheck = fields
+        .get("payload")
+        .ok_or_else(|| status::Custom(Status::InternalServerError, "Job payload is missing".into()))
+        .and_then(|value| {
+            serde_json::from_str(value)
+                .map_err(|error| status::Custom(Status::InternalServerError, error.to_string()))
+        })?;
+    if queued_check.run_on != run_on || queued_check.check_name != payload.check_name {
+        return Err(status::Custom(
+            Status::Forbidden,
+            "Job does not belong to this agent or check".to_owned(),
+        ));
+    }
+
+    let result = CheckResult {
+        check_name: queued_check.check_name,
+        output: payload.output.clone(),
+        status: payload.status.clone(),
+        timestamp: Some(payload.timestamp),
+        telegram_channels: queued_check.telegram_channels.into(),
+        mute_notifications: queued_check.mute_notifications,
+        mute_notifications_until: queued_check.mute_notifications_until,
+    };
+    let serialized = serde_json::to_string(&result)
+        .map_err(|error| status::Custom(Status::InternalServerError, error.to_string()))?;
+    let script = r#"
+        if redis.call('GET', KEYS[3]) then return 0 end
+        local pending = redis.call('XPENDING', KEYS[1], ARGV[1], ARGV[2], ARGV[2], 1)
+        if #pending == 0 then return -1 end
+        local result_id = redis.call('XADD', KEYS[2], '*', 'payload', ARGV[3])
+        redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+        redis.call('SET', KEYS[3], result_id, 'EX', 86400)
+        return 1
+    "#;
+    let result_key = format!("pinglow:agent-result:{stream}:{job_id}");
+    let outcome: i32 = redis::cmd("EVAL")
+        .arg(script)
+        .arg(3)
+        .arg(&stream)
+        .arg("pinglow:results")
+        .arg(&result_key)
+        .arg("agents")
+        .arg(job_id)
+        .arg(serialized)
+        .query_async(&mut connection)
+        .await
+        .map_err(|error| status::Custom(Status::InternalServerError, error.to_string()))?;
+    if outcome < 0 {
+        return Err(status::Custom(
+            Status::Conflict,
+            "Job is not pending for this agent".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn resolve_agent_result_target(
+    target: Option<String>,
+    allowed_targets: &[String],
+) -> Result<String, Status> {
+    let target = match target {
+        Some(target) => target,
+        None if allowed_targets.len() == 1 => allowed_targets[0].clone(),
+        None => return Err(Status::BadRequest),
+    };
+    if allowed_targets.iter().any(|allowed| allowed == &target) {
+        Ok(target)
+    } else {
+        Err(Status::Forbidden)
+    }
 }
 
 #[derive(Serialize, ToSchema, Debug)]
@@ -123,6 +460,7 @@ fn invalid_target_check() -> status::Custom<String> {
 pub struct SimpleCheckResultDto {
     pub check_name: String,
     pub passive: bool,
+    pub run_on: String,
     pub output: String,
     pub status: CheckResultStatus,
     pub timestamp: Option<DateTime<Utc>>,
@@ -188,6 +526,7 @@ pub async fn get_check_status(
         return Some(Json(SimpleCheckResultDto {
             check_name: target_check.to_string(),
             passive: check.passive,
+            run_on: check.run_on.clone(),
             output: "Check still needs to be executed".to_owned(),
             status: CheckResultStatus::Pending,
             timestamp: None,
@@ -200,6 +539,7 @@ pub async fn get_check_status(
     Some(Json(SimpleCheckResultDto {
         check_name: target_check.to_string(),
         passive: check.passive,
+        run_on: check.run_on.clone(),
         output: last_check_result.get("output"),
         status: CheckResultStatus::from(check_status),
         timestamp: last_check_result.get("timestamp"),
@@ -764,12 +1104,36 @@ mod tests {
     use crate::auth::CheckGroupAccess;
     use pinglow_common::CheckResultStatus;
 
+    #[test]
+    fn agent_results_must_name_an_authorized_target() {
+        let allowed = vec!["nas".to_owned(), "linux-hosts".to_owned()];
+        assert_eq!(
+            resolve_agent_result_target(Some("linux-hosts".to_owned()), &allowed),
+            Ok("linux-hosts".to_owned())
+        );
+        assert_eq!(
+            resolve_agent_result_target(Some("other".to_owned()), &allowed),
+            Err(Status::Forbidden)
+        );
+        assert_eq!(
+            resolve_agent_result_target(None, &allowed),
+            Err(Status::BadRequest)
+        );
+        assert_eq!(
+            resolve_agent_result_target(None, &["nas".to_owned()]),
+            Ok("nas".to_owned())
+        );
+    }
+
     fn test_check(check_name: &str, group_id: Option<&str>) -> Arc<PinglowCheck> {
         Arc::new(PinglowCheck {
             passive: true,
             script: None,
+            collector: None,
             interval: None,
             check_name: check_name.to_owned(),
+            run_on: "cluster".to_owned(),
+            expires_at: None,
             group_id: group_id.map(str::to_owned),
             group_name: group_id.map(str::to_owned),
             secrets: None,
@@ -812,8 +1176,11 @@ mod tests {
         let check = PinglowCheck {
             passive: true,
             script: None,
+            collector: None,
             interval: Some(300),
             check_name: "test-check".to_string(),
+            run_on: "cluster".to_owned(),
+            expires_at: None,
             group_id: Some("home".to_string()),
             group_name: Some("Home".to_string()),
             secrets: None,
@@ -835,8 +1202,11 @@ mod tests {
         let check = PinglowCheck {
             passive: false,
             script: None,
+            collector: None,
             interval: Some(60),
             check_name: "active-check".to_string(),
+            run_on: "cluster".to_owned(),
+            expires_at: None,
             group_id: None,
             group_name: None,
             secrets: None,
@@ -848,6 +1218,25 @@ mod tests {
         let dto = SimpleCheckDto::from(&Arc::new(check));
         assert!(!dto.passive);
         assert_eq!(dto.interval, Some(60));
+    }
+
+    #[test]
+    fn check_status_response_includes_execution_target() {
+        let response = SimpleCheckResultDto {
+            check_name: "group-check".to_owned(),
+            passive: false,
+            run_on: "agent/linux-hosts".to_owned(),
+            output: "OK".to_owned(),
+            status: CheckResultStatus::Ok,
+            timestamp: None,
+            notifications_muted: None,
+            notifications_muted_until: None,
+        };
+
+        assert_eq!(
+            serde_json::to_value(response).unwrap()["run_on"],
+            "agent/linux-hosts"
+        );
     }
 
     #[test]

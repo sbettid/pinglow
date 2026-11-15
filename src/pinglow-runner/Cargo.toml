@@ -13,6 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 pinglow-common = { path = "../common" }
+pinglow-executor = { path = "../pinglow-executor" }
 anyhow.workspace = true
 redis.workspace = true
 serde_json.workspace = true

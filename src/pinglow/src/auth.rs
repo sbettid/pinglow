@@ -28,7 +28,7 @@ use serde_json::Value;
 use tokio::sync::RwLock;
 
 use crate::config::{OidcConfig, PinglowConfig};
-use pinglow_common::{ApiKeyBinding, PinglowUserBinding, UserRole};
+use pinglow_common::{redis::check_stream_for_target, ApiKeyBinding, PinglowUserBinding, UserRole};
 
 #[derive(Clone, Debug)]
 struct BindingPermissions {
@@ -44,6 +44,7 @@ struct ApiKeyCredential {
     binding: String,
     role: UserRole,
     check_groups: Option<Vec<String>>,
+    agent_targets: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -188,6 +189,11 @@ async fn reconcile_api_key(
 ) -> Result<Action, ApiKeyReconcileError> {
     let binding_api = Api::<ApiKeyBinding>::namespaced(context.client.clone(), &context.namespace);
     let binding_name = binding.name_any();
+    let agent_targets = resolve_agent_targets(
+        binding.spec.agent_target.as_deref(),
+        binding.spec.agent_targets.as_deref(),
+    )
+    .map_err(ApiKeyReconcileError::Message)?;
     let secret_name = binding
         .spec
         .secret_name
@@ -254,6 +260,7 @@ async fn reconcile_api_key(
                                     binding: binding_name.clone(),
                                     role: binding.spec.role.clone(),
                                     check_groups: binding.spec.check_groups.clone(),
+                                    agent_targets: agent_targets.clone(),
                                 },
                             );
                         }
@@ -470,6 +477,37 @@ async fn redis_get(state: &AuthState, key: &str) -> Option<SessionUser> {
 pub struct Authenticated(pub SessionUser);
 pub struct Operator(pub SessionUser);
 pub struct OperatorApiKey;
+pub struct AgentApiKey {
+    pub binding: String,
+    pub targets: Vec<String>,
+}
+
+fn resolve_agent_targets(
+    agent_target: Option<&str>,
+    agent_targets: Option<&[String]>,
+) -> Result<Option<Vec<String>>, String> {
+    let targets = match (agent_target, agent_targets) {
+        (Some(_), Some(_)) => {
+            return Err("agent_target and agent_targets cannot both be set".to_owned())
+        }
+        (Some(target), None) => vec![target.to_owned()],
+        (None, Some(targets)) if !targets.is_empty() => targets.to_vec(),
+        (None, Some(_)) => return Err("agent_targets must not be empty".to_owned()),
+        (None, None) => return Ok(None),
+    };
+
+    let mut unique_targets = std::collections::HashSet::new();
+    for target in &targets {
+        let run_on = format!("agent/{target}");
+        if check_stream_for_target(&run_on).is_none() {
+            return Err(format!("invalid agent target '{target}'"));
+        }
+        if !unique_targets.insert(target) {
+            return Err(format!("duplicate agent target '{target}'"));
+        }
+    }
+    Ok(Some(targets))
+}
 
 async fn api_key_role(request: &Request<'_>) -> Outcome<UserRole, ()> {
     let state = match request.rocket().state::<Arc<AuthState>>() {
@@ -485,6 +523,7 @@ async fn api_key_role(request: &Request<'_>) -> Outcome<UserRole, ()> {
         .read()
         .await
         .get(keys[0])
+        .filter(|credential| credential.agent_targets.is_none())
         .map(|credential| credential.role.clone())
     {
         Some(role) => Outcome::Success(role),
@@ -507,6 +546,31 @@ impl<'r> FromRequest<'r> for OperatorApiKey {
     }
 }
 
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for AgentApiKey {
+    type Error = ();
+
+    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        let Some(state) = request.rocket().state::<Arc<AuthState>>() else {
+            return Outcome::Error((Status::ServiceUnavailable, ()));
+        };
+        let keys: Vec<_> = request.headers().get("x-api-key").collect();
+        if keys.len() != 1 {
+            return Outcome::Error((Status::Unauthorized, ()));
+        }
+        match state.api_keys.read().await.get(keys[0]) {
+            Some(credential) => match &credential.agent_targets {
+                Some(targets) => Outcome::Success(AgentApiKey {
+                    binding: credential.binding.clone(),
+                    targets: targets.clone(),
+                }),
+                None => Outcome::Error((Status::Forbidden, ())),
+            },
+            None => Outcome::Error((Status::Unauthorized, ())),
+        }
+    }
+}
+
 async fn authenticated(request: &Request<'_>) -> Outcome<SessionUser, ()> {
     let state = match request.rocket().state::<Arc<AuthState>>() {
         Some(state) => state,
@@ -519,7 +583,13 @@ async fn authenticated(request: &Request<'_>) -> Outcome<SessionUser, ()> {
     }
     let keys: Vec<_> = request.headers().get("x-api-key").collect();
     if keys.len() == 1 {
-        if let Some(credential) = state.api_keys.read().await.get(keys[0]) {
+        if let Some(credential) = state
+            .api_keys
+            .read()
+            .await
+            .get(keys[0])
+            .filter(|credential| credential.agent_targets.is_none())
+        {
             return Outcome::Success(SessionUser {
                 user: credential.binding.clone(),
                 role: credential.role.clone(),
@@ -956,10 +1026,33 @@ mod tests {
             binding: "test-binding".to_string(),
             role: UserRole::Operator,
             check_groups: Some(vec!["home".to_string()]),
+            agent_targets: None,
         };
         assert_eq!(credential.binding, "test-binding");
         assert_eq!(credential.role, UserRole::Operator);
         assert_eq!(credential.check_groups, Some(vec!["home".to_string()]));
+    }
+
+    #[test]
+    fn resolves_single_and_multiple_agent_targets() {
+        assert_eq!(
+            resolve_agent_targets(Some("nas"), None).unwrap(),
+            Some(vec!["nas".to_owned()])
+        );
+        assert_eq!(
+            resolve_agent_targets(None, Some(&["nas".to_owned(), "linux-hosts".to_owned()]))
+                .unwrap(),
+            Some(vec!["nas".to_owned(), "linux-hosts".to_owned()])
+        );
+        assert_eq!(resolve_agent_targets(None, None).unwrap(), None);
+    }
+
+    #[test]
+    fn rejects_invalid_agent_target_bindings() {
+        assert!(resolve_agent_targets(Some("nas"), Some(&["linux-hosts".to_owned()])).is_err());
+        assert!(resolve_agent_targets(None, Some(&[])).is_err());
+        assert!(resolve_agent_targets(None, Some(&["../nas".to_owned()])).is_err());
+        assert!(resolve_agent_targets(None, Some(&["nas".to_owned(), "nas".to_owned()])).is_err());
     }
 
     #[test]

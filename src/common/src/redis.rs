@@ -8,6 +8,22 @@ pub fn redis_client() -> Result<RedisClient, RedisError> {
     RedisClient::open(format!("redis://:{password}@{host}:6379"))
 }
 
+pub fn check_stream_for_target(run_on: &str) -> Option<String> {
+    if run_on == "cluster" {
+        return Some("pinglow:checks".to_owned());
+    }
+
+    let target = run_on.strip_prefix("agent/")?;
+    if target.is_empty()
+        || !target
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    {
+        return None;
+    }
+    Some(format!("pinglow:checks:agent:{target}"))
+}
+
 pub async fn init_streams(conn: &mut redis::aio::MultiplexedConnection) {
     // Tasks stream
     let _: Result<(), _> = redis::cmd("XGROUP")
@@ -130,5 +146,20 @@ mod tests {
             fields.get("payload").map(String::as_str),
             Some("serialized")
         );
+    }
+
+    #[test]
+    fn routes_only_valid_execution_targets() {
+        assert_eq!(
+            check_stream_for_target("cluster").as_deref(),
+            Some("pinglow:checks")
+        );
+        assert_eq!(
+            check_stream_for_target("agent/nas-1").as_deref(),
+            Some("pinglow:checks:agent:nas-1")
+        );
+        assert_eq!(check_stream_for_target("agent/"), None);
+        assert_eq!(check_stream_for_target("agent/nas_1"), None);
+        assert_eq!(check_stream_for_target("other"), None);
     }
 }

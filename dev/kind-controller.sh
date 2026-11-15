@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLUSTER_NAME="${KIND_CLUSTER_NAME:-pinglow-dev}"
@@ -21,7 +22,7 @@ if [[ ! "$USER_EMAIL" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; th
   exit 2
 fi
 
-for command in kind kubectl helm cargo; do
+for command in kind kubectl helm cargo base64; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "Required command not found: $command" >&2
     exit 2
@@ -31,22 +32,27 @@ done
 KUBECONFIG_FILE="$(mktemp)"
 RUNNER_PID=""
 CONTROLLER_PID=""
+AGENT_PID=""
 PORT_FORWARD_PIDS=()
+AGENT_TMP_DIR="$(mktemp -d)"
+AGENT_KEY_FILE="$AGENT_TMP_DIR/api-key"
+AGENT_CONFIG_FILE="$AGENT_TMP_DIR/agent.yaml"
 
 cleanup() {
-  for pid in "${PORT_FORWARD_PIDS[@]}" "$RUNNER_PID" "$CONTROLLER_PID"; do
+  for pid in "${PORT_FORWARD_PIDS[@]}" "$AGENT_PID" "$RUNNER_PID" "$CONTROLLER_PID"; do
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
       kill "$pid"
     fi
   done
 
-  for pid in "${PORT_FORWARD_PIDS[@]}" "$RUNNER_PID" "$CONTROLLER_PID"; do
+  for pid in "${PORT_FORWARD_PIDS[@]}" "$AGENT_PID" "$RUNNER_PID" "$CONTROLLER_PID"; do
     if [[ -n "$pid" ]]; then
       wait "$pid" 2>/dev/null || true
     fi
   done
 
-  rm -f "$KUBECONFIG_FILE"
+  rm -f "$KUBECONFIG_FILE" "$AGENT_KEY_FILE" "$AGENT_CONFIG_FILE"
+  rmdir "$AGENT_TMP_DIR" 2>/dev/null || true
 }
 
 trap cleanup EXIT
@@ -161,6 +167,15 @@ kubectl --context "kind-$CLUSTER_NAME" --namespace "$NAMESPACE" \
   rollout status statefulset/pinglow-dev-dependencies-timescaledb --timeout=5m
 kubectl --context "kind-$CLUSTER_NAME" --namespace "$NAMESPACE" \
   rollout status deployment/keycloak --timeout=180s
+if kubectl --context "kind-$CLUSTER_NAME" --namespace "$NAMESPACE" \
+  get checks.pinglow.io pinglow-dev-host-cpu --ignore-not-found -o name | grep -q .; then
+  # This legacy demo Check may be terminating while its local controller is stopped.
+  kubectl --context "kind-$CLUSTER_NAME" --namespace "$NAMESPACE" \
+    patch checks.pinglow.io pinglow-dev-host-cpu \
+    --type=merge -p '{"metadata":{"finalizers":[]}}'
+  kubectl --context "kind-$CLUSTER_NAME" --namespace "$NAMESPACE" \
+    delete checks.pinglow.io pinglow-dev-host-cpu --ignore-not-found --wait=false
+fi
 kubectl --context "kind-$CLUSTER_NAME" --namespace "$NAMESPACE" \
   apply -f "$ROOT_DIR/dev/demo-checks.yaml"
 kubectl --context "kind-$CLUSTER_NAME" apply -f - <<EOF
@@ -194,6 +209,7 @@ export OIDC_REDIRECT_URL="${OIDC_REDIRECT_URL:-http://localhost:5173/api/auth/ca
 export OIDC_GROUPS_CLAIM="${OIDC_GROUPS_CLAIM:-groups}"
 export OIDC_COOKIE_SECURE=false
 export RUNNER_NAME="${RUNNER_NAME:-pinglow-dev-runner}"
+export RUNNER_DROP_PRIVILEGES="${RUNNER_DROP_PRIVILEGES:-false}"
 export CHECKS_BASE_PATH="${CHECKS_BASE_PATH:-${TMPDIR:-/tmp}/pinglow-dev-checks}"
 
 start_port_forward() {
@@ -227,6 +243,8 @@ start_port_forward pinglow-dev-dependencies-timescaledb 5432 5432
 start_port_forward keycloak 8081 8080
 
 echo "Running Pinglow and its check runner locally against Kind context kind-$CLUSTER_NAME."
+echo "Local runner privilege dropping is $RUNNER_DROP_PRIVILEGES."
+echo "Starting the local dev-host agent for the script and built-in collector examples."
 echo "Start the frontend separately with: cd $ROOT_DIR/../pinglow-frontend/client && npm run dev"
 
 cargo run -p pinglow-runner &
@@ -234,8 +252,59 @@ RUNNER_PID=$!
 cargo run -p pinglow &
 CONTROLLER_PID=$!
 
+for _ in {1..120}; do
+  if ! kill -0 "$CONTROLLER_PID" 2>/dev/null; then
+    echo "The Pinglow controller exited before its API became ready." >&2
+    exit 1
+  fi
+  if (echo >/dev/tcp/127.0.0.1/8000) >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+
+if ! (echo >/dev/tcp/127.0.0.1/8000) >/dev/null 2>&1; then
+  echo "Timed out waiting for the local controller API on port 8000." >&2
+  exit 1
+fi
+
+api_key_data=""
+for _ in {1..120}; do
+  api_key_data="$(kubectl --context "kind-$CLUSTER_NAME" --namespace "$NAMESPACE" \
+    get secret pinglow-agent-dev-host-api-key \
+    -o jsonpath='{.data.API_KEY}' 2>/dev/null || true)"
+  if [[ -n "$api_key_data" ]]; then
+    break
+  fi
+  sleep 1
+done
+
+if [[ -z "$api_key_data" ]]; then
+  echo "Timed out waiting for the dev-host agent API key Secret." >&2
+  exit 1
+fi
+printf '%s' "$api_key_data" | base64 --decode >"$AGENT_KEY_FILE"
+
+AGENT_CHECKS_BASE_PATH="${TMPDIR:-/tmp}/pinglow-dev-agent-checks"
+mkdir -p "$AGENT_CHECKS_BASE_PATH"
+cat >"$AGENT_CONFIG_FILE" <<EOF
+agentId: dev-host
+controllerUrl: http://127.0.0.1:8000
+apiKeyFile: "$AGENT_KEY_FILE"
+allowedChecks:
+  - pinglow-dev-agent-heartbeat
+  - pinglow-dev-host-disk
+  - pinglow-dev-host-memory
+  - pinglow-dev-host-load
+checksBasePath: "$AGENT_CHECKS_BASE_PATH"
+executionTimeoutSeconds: 120
+dropPrivileges: false
+EOF
+cargo run -p pinglow-agent -- "$AGENT_CONFIG_FILE" &
+AGENT_PID=$!
+
 set +e
-wait -n "$RUNNER_PID" "$CONTROLLER_PID"
+wait -n "$RUNNER_PID" "$CONTROLLER_PID" "$AGENT_PID"
 status=$?
 set -e
 exit "$status"

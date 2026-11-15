@@ -4,7 +4,7 @@ sidebar_position: 1
 
 # Checks and scripts
 
-The basic idea is that monitoring is performed through `Checks` which execute a specific `Script` (only Python is supported for now) inside a Pinglow runner. 
+The basic idea is that monitoring is performed through `Checks` which execute either a `Script` (Python) or a built-in collector. Checks run in the cluster by default; `runOn: agent/<id>` routes one to that host's Pinglow agent.
 
 `Check` statuses are defined by the following elements: 
 
@@ -60,6 +60,110 @@ spec:
 ```
 
 The exit code of the script is used as the check result: exiting with `2`, as above, marks the check as critical, while a script that exits normally (`0`) is reported as okay.
+
+## Built-in collectors
+
+Collectors use the same Check scheduling and result pipeline as scripts, but are configured directly on the Check and do not need a `Script` resource. Exactly one of `scriptRef` or `collector` must be set on an active Check.
+
+```yaml
+apiVersion: pinglow.io/v1alpha1
+kind: Check
+metadata:
+  name: host-disk
+  namespace: pinglow
+spec:
+  runOn: agent/nas
+  interval: 60
+  collector:
+    type: disk
+    paths: ["/", "/mnt/data"]
+    excludeMountPoints: ["/mnt/backup"]
+    excludeFilesystemTypes: ["tmpfs", "proc", "sysfs"]
+    warningPercent: 80
+    criticalPercent: 90
+```
+
+Pinglow provides `disk`, `memory`, and `load` collectors. Each emits a readable
+summary followed by numeric performance data in the same `output|key=value`
+format used by script checks. Threshold checks are inclusive: a value at the
+critical threshold is CRITICAL; otherwise a value at the warning threshold is
+WARNING.
+
+The load collector replaces the former CPU-utilization collector. Migrate
+existing `type: cpu` checks to `type: load` and configure load-specific
+thresholds.
+
+### Disk collector
+
+| Parameter | Required | Meaning |
+| --- | --- | --- |
+| `paths` | Yes | One or more absolute paths. The collector checks the filesystem containing each path and deduplicates paths on the same filesystem. |
+| `excludeMountPoints` | No | Exact mount points to skip. |
+| `excludeFilesystemTypes` | No | Filesystem types to skip, such as `tmpfs` or `proc`. |
+| `warningPercent` | Yes | Used-space percentage at which the result becomes WARNING; range 0–100. |
+| `criticalPercent` | Yes | Used-space percentage at which the result becomes CRITICAL; range 0–100 and must be at least `warningPercent`. |
+
+For example:
+
+```yaml
+collector:
+  type: disk
+  paths: ["/", "/mnt/data"]
+  excludeMountPoints: ["/mnt/backup"]
+  excludeFilesystemTypes: ["tmpfs", "proc", "sysfs"]
+  warningPercent: 80
+  criticalPercent: 90
+```
+
+### Memory collector
+
+| Parameter | Required | Meaning |
+| --- | --- | --- |
+| `warningPercent` | Yes | Used-memory percentage at which the result becomes WARNING; range 0–100. |
+| `criticalPercent` | Yes | Used-memory percentage at which the result becomes CRITICAL; range 0–100 and must be at least `warningPercent`. |
+
+The collector reads Linux `/proc/meminfo` and reports used percentage and
+available GiB. For example:
+
+```yaml
+collector:
+  type: memory
+  warningPercent: 80
+  criticalPercent: 90
+```
+
+### Load collector
+
+| Parameter | Required | Meaning |
+| --- | --- | --- |
+| `periodMinutes` | No | Selects the load average used for both status and output: `1`, `5`, or `15` minutes. Defaults to `1`. |
+| `warningLoad` | Yes | Selected load average at which the result becomes WARNING; must be non-negative. |
+| `criticalLoad` | Yes | Selected load average at which the result becomes CRITICAL; must be non-negative and at least `warningLoad`. |
+
+The collector reads Linux `/proc/loadavg`. Load average is the average number
+of runnable or uninterruptible tasks, not CPU utilization, so thresholds are
+raw load values rather than percentages and should be tuned for the host.
+For example, this check uses and reports only the five-minute average:
+
+```yaml
+collector:
+  type: load
+  periodMinutes: 5
+  warningLoad: 2
+  criticalLoad: 4
+```
+
+Its output is similar to `Load average (5 min): 0.31|load_5m=0.31`.
+
+Collectors observe the Linux environment visible to the process. Disk paths
+refer to the runner container's filesystem view when run in-cluster; procfs
+load and memory values may be node-wide rather than cgroup-limited. Target an
+agent when you specifically want to monitor that host's filesystem and local
+resources.
+
+## Execution targets and scripts
+
+`runOn` defaults to `cluster`. A Check can target an agent with `runOn: agent/nas`. The agent must be configured to allow that Check. Script-based Checks are supported on agents as well as built-in collectors; approving a script means trusting its code to execute as the agent's unprivileged service user. The allowlist is not a sandbox.
 
 ## Performance data
 

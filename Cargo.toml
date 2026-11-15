@@ -3,7 +3,9 @@
 members = [
   "src/pinglow",
   "src/pinglow-runner",
-  "src/common"
+  "src/common",
+  "src/pinglow-executor",
+  "src/pinglow-agent"
 ]
 
 resolver = "2"
@@ -32,3 +34,4 @@ env_logger = "0.11.11"
 jsonwebtoken = { version = "12.0.0", default-features = false, features = ["rust_crypto"] }
 rand = "0.10.3"
 urlencoding = "2.1.3"
+serde_yaml = "0.9.34"

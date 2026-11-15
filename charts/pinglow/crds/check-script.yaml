@@ -103,6 +103,21 @@ spec:
                   items:
                     type: string
                   description: CheckGroup names this API key may access; omitted allows all groups.
+                agent_target:
+                  type: string
+                  pattern: "^[A-Za-z0-9-]+$"
+                  description: Deprecated single-target form. Use agent_targets to authorize one or more remote-agent targets.
+                agent_targets:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                    pattern: "^[A-Za-z0-9-]+$"
+                  description: |
+                    If set, this API key is restricted to these remote-agent targets and cannot be used as a user API key.
+              x-kubernetes-validations:
+                - rule: "!has(self.agent_target) || !has(self.agent_targets)"
+                  message: "Set only one of agent_target or agent_targets."
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -170,6 +185,64 @@ spec:
                   default: false
                 scriptRef:
                   type: string
+                collector:
+                  type: object
+                  required: [type]
+                  properties:
+                    type:
+                      type: string
+                      enum: [disk, memory, load]
+                    paths:
+                      type: array
+                      items:
+                        type: string
+                      minItems: 1
+                    excludeMountPoints:
+                      type: array
+                      items:
+                        type: string
+                    excludeFilesystemTypes:
+                      type: array
+                      items:
+                        type: string
+                    warningPercent:
+                      type: number
+                      minimum: 0
+                      maximum: 100
+                    criticalPercent:
+                      type: number
+                      minimum: 0
+                      maximum: 100
+                    warningLoad:
+                      type: number
+                      minimum: 0
+                    criticalLoad:
+                      type: number
+                      minimum: 0
+                    periodMinutes:
+                      type: integer
+                      enum: [1, 5, 15]
+                  x-kubernetes-validations:
+                    - rule: "self.type != 'disk' || (has(self.paths) && self.paths.all(path, path.startsWith('/')) && has(self.warningPercent) && has(self.criticalPercent))"
+                      message: "Disk collectors require paths and warningPercent/criticalPercent."
+                    - rule: "self.type == 'disk' || (!has(self.paths) && !has(self.excludeMountPoints) && !has(self.excludeFilesystemTypes))"
+                      message: "Disk-only fields may only be set for disk collectors."
+                    - rule: "self.type != 'memory' || (has(self.warningPercent) && has(self.criticalPercent))"
+                      message: "Memory collectors require warningPercent/criticalPercent."
+                    - rule: "self.type != 'load' || (has(self.warningLoad) && has(self.criticalLoad))"
+                      message: "Load collectors require warningLoad/criticalLoad."
+                    - rule: "self.type == 'load' || (!has(self.warningLoad) && !has(self.criticalLoad) && !has(self.periodMinutes))"
+                      message: "Load-only fields may only be set for load collectors."
+                    - rule: "self.type != 'load' || (!has(self.warningPercent) && !has(self.criticalPercent))"
+                      message: "Load collectors use warningLoad/criticalLoad, not percentage thresholds."
+                    - rule: "!has(self.warningPercent) || !has(self.criticalPercent) || self.warningPercent <= self.criticalPercent"
+                      message: "warningPercent must not exceed criticalPercent."
+                    - rule: "!has(self.warningLoad) || !has(self.criticalLoad) || self.warningLoad <= self.criticalLoad"
+                      message: "warningLoad must not exceed criticalLoad."
+                runOn:
+                  type: string
+                  default: cluster
+                  pattern: "^(cluster|agent/[A-Za-z0-9-]+)$"
                 interval:
                   type: integer
                   description: "Interval at which to run the check, in seconds"
@@ -193,8 +266,8 @@ spec:
                   format: date-time
                   description: RFC 3339 timestamp indicating when to resume notifications.
               x-kubernetes-validations:
-                - rule: "self.passive == true || (has(self.scriptRef) && has(self.interval))"
-                  message: "An active check must have the scriptRef and interval defined."
+                - rule: "self.passive == true ? (!has(self.scriptRef) && !has(self.collector)) : ((has(self.scriptRef) != has(self.collector)) && has(self.interval))"
+                  message: "A passive check must not define a script or collector; an active check must define exactly one of scriptRef or collector and an interval."
 
 ---
 apiVersion: apiextensions.k8s.io/v1

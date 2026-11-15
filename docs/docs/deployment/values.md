@@ -32,6 +32,12 @@ The chart runs the runner as UID/GID `10000` and grants it `SETUID` so check pro
 | `runner.cooldownPeriod` | `300` | Seconds to wait before scaling down. |
 | `runner.resources` | requests `500m` / `256Mi`, limits `1000m` / `512Mi` | CPU and memory of each runner. |
 
+## Agent gateway (`agentGateway`)
+
+| Value | Default | Description |
+| --- | --- | --- |
+| `agentGateway.service.enabled` | `true` | Creates an internal `ClusterIP` Service for the controller's agent endpoints. The chart does not create an Ingress or LoadBalancer. |
+
 ## Autoscaling (`keda`)
 
 | Value | Default | Description |

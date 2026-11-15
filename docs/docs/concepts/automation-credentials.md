@@ -55,6 +55,22 @@ kubectl port-forward -n pinglow svc/pinglow 8000:80
 - **role** (required): One of `viewer`, `operator`, or `admin`.
 - **secret_name** (optional): The name of the Secret to manage. Defaults to `<binding-name>-api-key`.
 - **check_groups** (optional): Allowlist of `CheckGroup` resource names this API key can access. When omitted, the key has access to all checks. When set, ungrouped checks and checks in unlisted groups are not accessible. Admin keys always have access to all groups.
+- **agent_targets** (optional): Restricts the key to one or more remote-agent targets. Agent-scoped keys can only poll and submit results for these targets; they cannot be used as user/operator API keys. The deprecated singular **agent_target** remains supported.
+
+Use a distinct binding and key for each agent machine. To let multiple agents compete for checks routed to one group, give each binding the same target name. See [agent deployment](/docs/deployment/agent).
+
+```yaml
+apiVersion: pinglow.io/v1alpha1
+kind: ApiKeyBinding
+metadata:
+  name: nas-agent
+  namespace: pinglow
+spec:
+  role: operator
+  agent_targets:
+    - nas
+    - linux-hosts
+```
 
 ## Lifecycle
 

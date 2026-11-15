@@ -37,3 +37,63 @@ spec:
   groupRef: development
   scriptRef: pinglow-dev-heartbeat
   interval: 60
+---
+apiVersion: pinglow.io/v1alpha1
+kind: Check
+metadata:
+  name: pinglow-dev-agent-heartbeat
+spec:
+  groupRef: development
+  runOn: agent/dev-host
+  scriptRef: pinglow-dev-heartbeat
+  interval: 60
+---
+apiVersion: pinglow.io/v1alpha1
+kind: ApiKeyBinding
+metadata:
+  name: pinglow-agent-dev-host
+spec:
+  role: operator
+  agent_target: dev-host
+---
+apiVersion: pinglow.io/v1alpha1
+kind: Check
+metadata:
+  name: pinglow-dev-host-disk
+spec:
+  groupRef: development
+  runOn: agent/dev-host
+  interval: 60
+  collector:
+    type: disk
+    paths: ["/"]
+    excludeFilesystemTypes: ["tmpfs", "proc", "sysfs", "devtmpfs"]
+    warningPercent: 80
+    criticalPercent: 90
+---
+apiVersion: pinglow.io/v1alpha1
+kind: Check
+metadata:
+  name: pinglow-dev-host-memory
+spec:
+  groupRef: development
+  runOn: agent/dev-host
+  interval: 60
+  collector:
+    type: memory
+    warningPercent: 80
+    criticalPercent: 90
+---
+apiVersion: pinglow.io/v1alpha1
+kind: Check
+metadata:
+  name: pinglow-dev-host-load
+spec:
+  groupRef: development
+  runOn: agent/dev-host
+  interval: 60
+  collector:
+    type: load
+    periodMinutes: 5
+    warningLoad: 2
+    criticalLoad: 4
