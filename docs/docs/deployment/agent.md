@@ -6,7 +6,7 @@ import useBaseUrl from '@docusaurus/useBaseUrl';
 
 # Pinglow agent
 
-The agent is a Linux service that connects outbound to Pinglow's controller using HTTPS long-polling. It does not connect to Redis or TimescaleDB. The Helm chart provides an internal `ClusterIP` service only; it creates no Ingress or LoadBalancer. To reach a remote host, expose the controller API through a private VPN or an operator-managed HTTPS reverse proxy. Do not expose Redis.
+The agent is a Linux service that connects outbound to Pinglow's controller using HTTPS long-polling. It does not connect to Redis or TimescaleDB. To reach a remote host, expose the controller API through a private VPN or an operator-managed HTTPS reverse proxy.
 
 ## Create an agent identity
 
@@ -25,27 +25,57 @@ spec:
     - linux-hosts
 ```
 
-`agent_targets` is the list of queues this agent is allowed to consume. Older bindings using the single `agent_target` field are still supported. To form a group, give each group member a separate binding and key that includes the same target, such as `linux-hosts`. Set `runOn: agent/linux-hosts` on a Check; the agents in that group share one Redis consumer group, so each queued run is assigned to one agent. Delivery is at-least-once, so a job may be retried after a worker failure.
+`agent_targets` is the list of queues this agent is allowed to consume. To form a group, give each group member a separate binding and key that includes the same target, such as `linux-hosts`. Set `runOn: agent/linux-hosts` on a Check; the agents in that group share one Redis consumer group, so each queued run is assigned to one agent. Delivery is at-least-once, so a job may be retried after a worker failure.
 
 An agent can be authorized for both its own target and shared groups. The `agentId` in the agent YAML is a local logging label; target authorization comes from the API-key binding.
 
 ## Install on Linux
 
-Download the matching `pinglow-agent` archive for `linux-amd64` or `linux-arm64` from the GitHub release and verify its SHA-256 checksum. The archive contains the binary, example configuration, and systemd unit. Install the `acl` package if `setfacl` is not already available.
+Before installing, create the agent's `ApiKeyBinding` in the Pinglow namespace and make sure the host can reach the controller over HTTPS. You will need `kubectl` configured for that cluster, `curl`, `tar`, and `sha256sum`. Install your distribution's `acl` package if `setfacl` is not already available.
 
-Create a dedicated unprivileged account and directories:
+### 1. Download and verify the release
+
+Set `VERSION` to the release tag you want to install. The commands below detect `amd64` or `arm64`, download the matching archive and checksum file, verify the archive, and extract it:
 
 ```bash
-sudo useradd --system --user-group --home-dir /var/lib/pinglow-agent --create-home \
-  --shell /usr/sbin/nologin pinglow-agent
-sudo install -d -o root -g pinglow-agent -m 0750 /etc/pinglow-agent
-sudo install -d -o pinglow-agent -g pinglow-agent -m 0750 \
-  /var/lib/pinglow-agent/checks
-sudo install -o root -g root -m 0755 pinglow-agent /usr/local/bin/pinglow-agent
-sudo install -o root -g root -m 0644 agent.example.yaml /etc/pinglow-agent/agent.yaml
-sudo install -o root -g root -m 0644 pinglow-agent.service \
-  /etc/systemd/system/pinglow-agent.service
+VERSION=vX.Y.Z # replace with the release tag, for example v0.17.0
+
+case "$(uname -m)" in
+  x86_64) ARCH=amd64 ;;
+  aarch64|arm64) ARCH=arm64 ;;
+  *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+
+ARCHIVE="pinglow-agent-${VERSION}-linux-${ARCH}.tar.gz"
+RELEASE_URL="https://github.com/sbettid/pinglow/releases/download/${VERSION}"
+mkdir -p "$HOME/pinglow-agent-install"
+cd "$HOME/pinglow-agent-install"
+curl --fail --location --remote-name "$RELEASE_URL/$ARCHIVE"
+curl --fail --location --remote-name "$RELEASE_URL/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS
+tar -xzf "$ARCHIVE"
 ```
+
+The archive contains the agent binary, example configuration, systemd unit, and a copy of these installation instructions.
+
+### 2. Install the service
+
+From the extracted archive directory, run this once to create the service account and install the files:
+
+```bash
+sudo bash -eu <<'EOF'
+useradd -r -U -d /var/lib/pinglow-agent -s /usr/sbin/nologin -m pinglow-agent
+install -d -o root -g pinglow-agent -m 0750 /etc/pinglow-agent
+install -d -o pinglow-agent -g pinglow-agent -m 0750 \
+  /var/lib/pinglow-agent/checks
+install -o root -g root -m 0755 pinglow-agent /usr/local/bin/pinglow-agent
+install -o root -g root -m 0644 agent.example.yaml /etc/pinglow-agent/agent.yaml
+install -o root -g root -m 0644 pinglow-agent.service \
+  /etc/systemd/system/pinglow-agent.service
+EOF
+```
+
+### 3. Configure the API key and agent
 
 Write the API key from the Kubernetes Secret to `/etc/pinglow-agent/api-key` with owner `root:root` and mode `0600`, then grant read access only to the agent service account with an ACL:
 
@@ -73,7 +103,11 @@ checksBasePath: /var/lib/pinglow-agent/checks
 executionTimeoutSeconds: 120
 ```
 
+Replace `controllerUrl` with the HTTPS URL reachable from this host. Set `allowedChecks` to the exact names of the Checks this host is approved to run. Each Check must also use `runOn: agent/<target>`, where `<target>` is listed in this agent's `ApiKeyBinding`.
+
 Keep `dropPrivileges` enabled (the default) in service deployments. It requires the unit's restricted `CAP_SETUID` capability and runs scripts as `nobody`. Disabling it is intended only for localhost development when the agent process has no such capability; scripts then run with the agent process's own user permissions. Do not use that setting for a production host.
+
+### 4. Start and check the service
 
 Use the systemd unit from the release archive, review it for your distribution, then enable it:
 
