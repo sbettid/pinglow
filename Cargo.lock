@@ -2471,7 +2471,7 @@ checksum = "3b3cff922bd51709b605d9ead9aa71031d81447142d828eb4a6eba76fe619f9b"
 
 [[package]]
 name = "pinglow"
-version = "0.16.2"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -2503,7 +2503,7 @@ dependencies = [
 
 [[package]]
 name = "pinglow-agent"
-version = "0.16.2"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2520,7 +2520,7 @@ dependencies = [
 
 [[package]]
 name = "pinglow-common"
-version = "0.16.2"
+version = "0.17.0"
 dependencies = [
  "chrono",
  "k8s-openapi",
@@ -2538,7 +2538,7 @@ dependencies = [
 
 [[package]]
 name = "pinglow-executor"
-version = "0.16.2"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2549,7 +2549,7 @@ dependencies = [
 
 [[package]]
 name = "pinglow-runner"
-version = "0.16.2"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
