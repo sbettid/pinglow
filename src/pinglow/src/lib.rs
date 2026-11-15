@@ -53,6 +53,38 @@ pub async fn load_single_runnable_check(
         Api::namespaced(client.clone(), &config.target_namespace);
     let check_groups: Api<CheckGroup> = Api::namespaced(client.clone(), &config.target_namespace);
 
+    let has_script = check.spec.scriptRef.is_some();
+    let has_collector = check.spec.collector.is_some();
+    if check.spec.passive {
+        if has_script || has_collector {
+            return Err(ReconcileError::GeneralError(
+                "Passive checks cannot define a script or collector".to_owned(),
+            ));
+        }
+    } else if has_script == has_collector {
+        return Err(ReconcileError::GeneralError(
+            "An active check must define exactly one of scriptRef or collector".to_owned(),
+        ));
+    }
+
+    let run_on = check
+        .spec
+        .runOn
+        .clone()
+        .unwrap_or_else(|| "cluster".to_owned());
+    if run_on != "cluster"
+        && !run_on.strip_prefix("agent/").is_some_and(|target| {
+            !target.is_empty()
+                && target
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+    {
+        return Err(ReconcileError::GeneralError(format!(
+            "Invalid runOn target '{run_on}'; expected 'cluster' or 'agent/<id>'"
+        )));
+    }
+
     // Get the script name from the check specification
     let script_name = &check.spec.scriptRef;
 
@@ -134,8 +166,11 @@ pub async fn load_single_runnable_check(
     let runnable_check = PinglowCheck {
         passive: check.spec.passive,
         script: script.map(|s| s.spec),
+        collector: check.spec.collector.clone(),
         interval: check.spec.interval,
         check_name,
+        run_on,
+        expires_at: None,
         group_id,
         group_name,
         secrets,

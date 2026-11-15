@@ -75,6 +75,8 @@ redis:
   secretName: "my-redis-secret"
 ```
 
+The chart's optional agent gateway Service is an internal `ClusterIP`; the chart does not expose it through an Ingress or LoadBalancer. To connect a remote host, configure a private HTTPS route to the controller API (for example over a VPN). Never expose Redis to the agent network.
+
 ## 4. OIDC (optional)
 
 To let users log in from the browser through an OIDC provider, create the OIDC Secret as described in [OIDC authentication](/docs/deployment/oidc). Without it, Pinglow can still be used through [API keys](/docs/concepts/automation-credentials).

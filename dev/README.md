@@ -1,9 +1,10 @@
 ## Local development with Kind
 
-Run the controller on your machine against a dedicated Kind cluster:
+Run the controller, runner, and a local agent on your machine against a
+dedicated Kind cluster:
 
 ```bash
-./dev/kind-controller.sh dev@example.com
+./dev/pinglow kind dev@example.com
 ```
 
 The helper creates the `pinglow-dev` Kind cluster if needed, or reuses it if
@@ -11,8 +12,8 @@ healthy. Because this cluster is disposable, it deletes and recreates it if
 the control plane is unavailable or its node does not become ready. The helper
 deploys Redis, TimescaleDB, and Keycloak in the cluster, then installs Pinglow's
 CRDs, creates the `pinglow` namespace and an email-based viewer binding plus a
-group-based admin binding, applies a sample heartbeat check, and starts the
-controller and runner locally. Redis and TimescaleDB are rendered from the
+group-based admin binding, applies sample checks, and starts the controller,
+runner, and agent locally. Redis and TimescaleDB are rendered from the
 Pinglow Helm chart and applied to Kind; only their templates are selected, so
 the chart's controller and runner remain mandatory and are not deployed by
 this workflow. Dependency image versions therefore stay defined in one place.
@@ -28,10 +29,25 @@ includes groups in the ID token. This exercises group mapping and verifies
 that the admin group binding takes precedence over the email viewer binding.
 The heartbeat runs every minute without external dependencies, reports the
 current UTC time, and records hour/minute metrics for the performance chart.
+The agent runs an allowlisted copy of the heartbeat Check plus disk, memory,
+and CPU collectors against the local machine. Its API key is read from the
+development cluster's generated Secret and written only to a temporary file
+removed when the helper exits. The local agent config disables the `nobody`
+privilege drop because a developer-launched process does not have `CAP_SETUID`;
+the agent remains confined to the developer's account. Do not copy that
+development setting into a systemd deployment.
 The helper uses a temporary kubeconfig for this cluster and does not change the
-current kubectl context. The runner executes scripts locally, so Python 3 with
-the `venv` module must be installed. The user email must match the email of a
-Keycloak user.
+current kubectl context. Both local execution components need Python 3 with
+the `venv` module for the script examples. The user email must match the email
+of a Keycloak user.
+
+Build or run an individual component with the same helper:
+
+```bash
+./dev/pinglow build all
+./dev/pinglow build agent
+./dev/pinglow run agent /path/to/agent.yaml
+```
 
 In a second terminal, run the frontend in Vite development mode:
 

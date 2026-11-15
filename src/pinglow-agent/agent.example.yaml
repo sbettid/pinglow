@@ -1,0 +1,8 @@
+agentId: nas
+controllerUrl: https://pinglow.example.net
+apiKeyFile: /etc/pinglow-agent/api-key
+allowedChecks:
+  - nas-disk
+  - nas-memory
+checksBasePath: /var/lib/pinglow-agent/checks
+executionTimeoutSeconds: 120

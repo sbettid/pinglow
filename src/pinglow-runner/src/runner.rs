@@ -8,7 +8,11 @@ use pinglow_common::{
 use redis::AsyncConnectionConfig;
 use tokio_util::sync::CancellationToken;
 
-use crate::{config::get_config_from_env, executor::execute_check, queue::fetch_task};
+use crate::{
+    config::get_config_from_env,
+    executor::{execute_check, ExecutorConfig},
+    queue::fetch_task,
+};
 
 pub async fn run() -> anyhow::Result<()> {
     let redis_client = redis_client()?;
@@ -46,7 +50,11 @@ pub async fn run() -> anyhow::Result<()> {
             .get_multiplexed_async_connection_with_config(&async_connection)
             .await?;
 
-        let base_path = runner_config.checks_base_path.clone();
+        let executor_config = ExecutorConfig {
+            base_path: runner_config.checks_base_path.clone(),
+            drop_privileges: true,
+            timeout: Duration::from_secs(runner_config.execution_timeout_seconds),
+        };
         let connection_config = async_connection.clone();
 
         match fetch_task(
@@ -61,13 +69,7 @@ pub async fn run() -> anyhow::Result<()> {
                 let redis_client = redis_client.clone();
                 tokio::spawn(async move {
                     // Execute check
-                    let result = match execute_check(check, &base_path).await {
-                        Ok(r) => r,
-                        Err(e) => {
-                            error!("Error executing check: {e}");
-                            return;
-                        }
-                    };
+                    let result = execute_check(check, &executor_config).await;
 
                     let mut redis_conn = match redis_client
                         .get_multiplexed_async_connection_with_config(&connection_config)

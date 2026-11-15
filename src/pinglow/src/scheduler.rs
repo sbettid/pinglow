@@ -1,4 +1,5 @@
 use anyhow::Error;
+use chrono::{Duration as ChronoDuration, Utc};
 use kube::ResourceExt;
 use log::debug;
 use log::error;
@@ -17,7 +18,7 @@ use crate::{
     config::PinglowConfig,
     load_single_runnable_check,
 };
-use pinglow_common::error::SerializeError;
+use pinglow_common::{error::SerializeError, redis::check_stream_for_target};
 
 #[derive(Clone, Debug)]
 struct ScheduledCheck {
@@ -186,12 +187,18 @@ pub async fn enqueue_check(
     check: &Arc<PinglowCheck>,
     redis_stream_max_len: usize,
 ) -> Result<String, Error> {
-    let payload = serde_json::to_string(check.as_ref())
+    let stream = check_stream_for_target(&check.run_on)
+        .ok_or_else(|| anyhow::anyhow!("Invalid check execution target '{}'", check.run_on))?;
+    let mut queued_check = check.as_ref().clone();
+    if check.run_on.starts_with("agent/") {
+        let ttl = check.interval.unwrap_or(300).clamp(1, 300);
+        queued_check.expires_at = Some(Utc::now() + ChronoDuration::seconds(ttl as i64));
+    }
+    let payload = serde_json::to_string(&queued_check)
         .map_err(|e| SerializeError::SerializationError(format!("Error serializing check: {e}")))?;
 
-    // XADD pinglow:tasks * payload "<json>"
     let id: String = redis::cmd("XADD")
-        .arg("pinglow:checks")
+        .arg(stream)
         .arg("MAXLEN")
         .arg("~")
         .arg(redis_stream_max_len)
@@ -216,6 +223,8 @@ mod tests {
             name,
             CheckSpec {
                 scriptRef: None,
+                collector: None,
+                runOn: None,
                 interval,
                 secretRefs: None,
                 telegramChannelRefs: None,
@@ -231,8 +240,11 @@ mod tests {
         Arc::new(PinglowCheck {
             passive: false,
             script: None,
+            collector: None,
             interval: Some(60),
             check_name: name.to_owned(),
+            run_on: "cluster".to_owned(),
+            expires_at: None,
             group_id: None,
             group_name: None,
             secrets: None,

@@ -35,12 +35,17 @@ jobs:
       - name: Build with cross
         run: cross build --release --target ${{ matrix.target }} -p pinglow-runner
 
+      - name: Build agent with cross
+        run: cross build --release --target ${{ matrix.target }} -p pinglow-agent
+
       - name: Rename binary for Docker build
         run: |
           mkdir -p ./bin/pinglow/${{ matrix.target }}
           mkdir -p ./bin/pinglow-runner/${{ matrix.target }}
+          mkdir -p ./bin/pinglow-agent/${{ matrix.target }}
           cp target/${{ matrix.target }}/release/pinglow ./bin/pinglow/${{ matrix.target }}/
           cp target/${{ matrix.target }}/release/pinglow-runner ./bin/pinglow-runner/${{ matrix.target }}/
+          cp target/${{ matrix.target }}/release/pinglow-agent ./bin/pinglow-agent/${{ matrix.target }}/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -53,6 +58,10 @@ jobs:
           name: bin-pinglow-runner-${{ matrix.target }}
           path: ./bin/pinglow-runner/${{ matrix.target }}
 
+      - uses: actions/upload-artifact@v7
+        with:
+          name: bin-pinglow-agent-${{ matrix.target }}
+          path: ./bin/pinglow-agent/${{ matrix.target }}
 
   docker-runner:
     name: Build and Push Multi-Arch Image for Pinglow runner
@@ -227,6 +236,7 @@ jobs:
     name: Create GitHub Release
     runs-on: ubuntu-latest
     needs:
+      - build
       - docker-runner
       - docker-pinglow
       - deploy
@@ -271,6 +281,33 @@ jobs:
           name: helm-chart
           path: chart-packages/pinglow-*.tgz
 
+      - name: Download agent binaries
+        uses: actions/download-artifact@v8
+        with:
+          name: bin-pinglow-agent-x86_64-unknown-linux-musl
+          path: release-assets/agent/amd64
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: bin-pinglow-agent-aarch64-unknown-linux-musl
+          path: release-assets/agent/arm64
+
+      - name: Package Linux agent releases
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir -p release-assets/packages/amd64 release-assets/packages/arm64
+          for arch in amd64 arm64; do
+            stage="release-assets/stage-$arch"
+            mkdir -p "$stage"
+            cp "release-assets/agent/$arch/pinglow-agent" "$stage/"
+            cp src/pinglow-agent/agent.example.yaml "$stage/agent.example.yaml"
+            cp src/pinglow-agent/systemd/pinglow-agent.service "$stage/"
+            cp docs/docs/deployment/agent.md "$stage/INSTALL.md"
+            tar -C "$stage" -czf "release-assets/packages/pinglow-agent-${VERSION}-linux-${arch}.tar.gz" .
+          done
+          (cd release-assets/packages && sha256sum pinglow-agent-*.tar.gz > SHA256SUMS)
+
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -278,4 +315,6 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
             chart-packages/pinglow-*.tgz \
+            release-assets/packages/pinglow-agent-*.tar.gz \
+            release-assets/packages/SHA256SUMS \
             --generate-notes

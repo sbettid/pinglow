@@ -15,6 +15,7 @@ const sidebars: SidebarsConfig = {
         'deployment/requirements',
         'deployment/quick-start',
         'deployment/deployment',
+        'deployment/agent',
         'deployment/oidc',
         'deployment/values'
       ],

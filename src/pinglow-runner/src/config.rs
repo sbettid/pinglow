@@ -7,6 +7,7 @@ pub struct PinglowRunnerConfig {
     pub runner_name: String,
     pub checks_base_path: String,
     pub task_claim_idle_ms: u64,
+    pub execution_timeout_seconds: u64,
 }
 
 /**
@@ -21,5 +22,12 @@ pub fn get_config_from_env() -> PinglowRunnerConfig {
         task_claim_idle_ms: env::var("TASK_CLAIM_IDLE_MS")
             .map(|value| value.parse().expect("TASK_CLAIM_IDLE_MS must be a number"))
             .unwrap_or(300000),
+        execution_timeout_seconds: env::var("EXECUTION_TIMEOUT_SECONDS")
+            .map(|value| {
+                value
+                    .parse()
+                    .expect("EXECUTION_TIMEOUT_SECONDS must be a number")
+            })
+            .unwrap_or(300),
     }
 }

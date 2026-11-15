@@ -103,6 +103,22 @@ spec:
                   items:
                     type: string
                   description: CheckGroup names this API key may access; omitted allows all groups.
+                agent_target:
+                  type: string
+                  pattern: "^[A-Za-z0-9-]+$"
+                  description: Deprecated single-target form. Use agent_targets to authorize one or more remote-agent targets.
+                agent_targets:
+                  type: array
+                  minItems: 1
+                  uniqueItems: true
+                  items:
+                    type: string
+                    pattern: "^[A-Za-z0-9-]+$"
+                  description: |
+                    If set, this API key is restricted to these remote-agent targets and cannot be used as a user API key.
+              x-kubernetes-validations:
+                - rule: "!has(self.agent_target) || !has(self.agent_targets)"
+                  message: "Set only one of agent_target or agent_targets."
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
@@ -170,6 +186,49 @@ spec:
                   default: false
                 scriptRef:
                   type: string
+                collector:
+                  type: object
+                  required: [type]
+                  properties:
+                    type:
+                      type: string
+                      enum: [disk, memory, cpu]
+                    paths:
+                      type: array
+                      items:
+                        type: string
+                      minItems: 1
+                    excludeMountPoints:
+                      type: array
+                      items:
+                        type: string
+                    excludeFilesystemTypes:
+                      type: array
+                      items:
+                        type: string
+                    warningPercent:
+                      type: number
+                      minimum: 0
+                      maximum: 100
+                    criticalPercent:
+                      type: number
+                      minimum: 0
+                      maximum: 100
+                    sampleSeconds:
+                      type: integer
+                      minimum: 1
+                      maximum: 60
+                  x-kubernetes-validations:
+                    - rule: "self.type != 'disk' || (has(self.paths) && self.paths.all(path, path.startsWith('/')) && has(self.warningPercent) && has(self.criticalPercent))"
+                      message: "Disk collectors require paths and warningPercent/criticalPercent."
+                    - rule: "self.type == 'disk' || (has(self.warningPercent) && has(self.criticalPercent))"
+                      message: "Memory and CPU collectors require warningPercent/criticalPercent."
+                    - rule: "!has(self.warningPercent) || !has(self.criticalPercent) || self.warningPercent <= self.criticalPercent"
+                      message: "warningPercent must not exceed criticalPercent."
+                runOn:
+                  type: string
+                  default: cluster
+                  pattern: "^(cluster|agent/[A-Za-z0-9-]+)$"
                 interval:
                   type: integer
                   description: "Interval at which to run the check, in seconds"
@@ -193,8 +252,8 @@ spec:
                   format: date-time
                   description: RFC 3339 timestamp indicating when to resume notifications.
               x-kubernetes-validations:
-                - rule: "self.passive == true || (has(self.scriptRef) && has(self.interval))"
-                  message: "An active check must have the scriptRef and interval defined."
+                - rule: "self.passive == true ? (!has(self.scriptRef) && !has(self.collector)) : ((has(self.scriptRef) != has(self.collector)) && has(self.interval))"
+                  message: "A passive check must not define a script or collector; an active check must define exactly one of scriptRef or collector and an interval."
 
 ---
 apiVersion: apiextensions.k8s.io/v1

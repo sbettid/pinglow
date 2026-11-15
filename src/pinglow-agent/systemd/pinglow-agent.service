@@ -1,0 +1,30 @@
+[Unit]
+Description=Pinglow remote check agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=pinglow-agent
+Group=pinglow-agent
+ExecStart=/usr/local/bin/pinglow-agent /etc/pinglow-agent/agent.yaml
+Restart=on-failure
+RestartSec=10s
+StateDirectory=pinglow-agent
+StateDirectoryMode=0750
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=CAP_SETUID
+AmbientCapabilities=CAP_SETUID
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/pinglow-agent
+
+[Install]
+WantedBy=multi-user.target

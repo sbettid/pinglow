@@ -1,0 +1,13 @@
+[package]
+name = "pinglow-executor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+libc = "0.2"
+pinglow-common = { path = "../common" }
+tokio.workspace = true

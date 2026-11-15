@@ -4,7 +4,7 @@ sidebar_position: 1
 
 # Checks and scripts
 
-The basic idea is that monitoring is performed through `Checks` which execute a specific `Script` (only Python is supported for now) inside a Pinglow runner. 
+The basic idea is that monitoring is performed through `Checks` which execute either a `Script` (Python) or a built-in collector. Checks run in the cluster by default; `runOn: agent/<id>` routes one to that host's Pinglow agent.
 
 `Check` statuses are defined by the following elements: 
 
@@ -60,6 +60,38 @@ spec:
 ```
 
 The exit code of the script is used as the check result: exiting with `2`, as above, marks the check as critical, while a script that exits normally (`0`) is reported as okay.
+
+## Built-in collectors
+
+Collectors use the same Check scheduling and result pipeline as scripts, but are configured directly on the Check and do not need a `Script` resource. Exactly one of `scriptRef` or `collector` must be set on an active Check.
+
+```yaml
+apiVersion: pinglow.io/v1alpha1
+kind: Check
+metadata:
+  name: host-disk
+  namespace: pinglow
+spec:
+  runOn: agent/nas
+  interval: 60
+  collector:
+    type: disk
+    paths: ["/", "/mnt/data"]
+    excludeMountPoints: ["/mnt/backup"]
+    excludeFilesystemTypes: ["tmpfs", "proc", "sysfs"]
+    warningPercent: 80
+    criticalPercent: 90
+```
+
+The initial collectors are `disk`, `memory`, and `cpu`. Disk checks inspect the filesystems containing the configured paths, deduplicate paths on the same filesystem, and support excluding mount points and filesystem types. Memory reports used percentage and available GiB. CPU reports usage sampled over `sampleSeconds` (1–60, default 1). Thresholds use inclusive warning/critical percentages.
+
+Collector output includes a readable summary followed by comma-separated numeric performance data, for example `Disk /mnt/data: 72.4% used, 38.2 GiB free|disk_mnt_data_used_pct=72.4,disk_mnt_data_free_gib=38.2`.
+
+Collectors observe the Linux environment visible to the process. Disk paths refer to the runner container's filesystem view when run in-cluster; procfs CPU and memory values may be node-wide rather than cgroup-limited. Target an agent when you specifically want to monitor that host's filesystem and local resources.
+
+## Execution targets and scripts
+
+`runOn` defaults to `cluster`. A Check can target an agent with `runOn: agent/nas`. The agent must be configured to allow that Check. Script-based Checks are supported on agents as well as built-in collectors; approving a script means trusting its code to execute as the agent's unprivileged service user. The allowlist is not a sandbox.
 
 ## Performance data
 

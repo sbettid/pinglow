@@ -114,8 +114,11 @@ mod tests {
         serde_json::to_string(&PinglowCheck {
             passive: false,
             script: None,
+            collector: None,
             interval: Some(60),
             check_name: "check-a".to_owned(),
+            run_on: "cluster".to_owned(),
+            expires_at: None,
             group_id: None,
             group_name: None,
             secrets: None,

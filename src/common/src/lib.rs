@@ -11,13 +11,46 @@ use utoipa::ToSchema;
 pub mod error;
 pub mod redis;
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
 pub enum CheckResultStatus {
     Ok,
     Warning,
     Critical,
     CheckError,
     Pending,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum BuiltinCollector {
+    Disk {
+        paths: Vec<String>,
+        #[serde(default)]
+        exclude_mount_points: Vec<String>,
+        #[serde(default)]
+        exclude_filesystem_types: Vec<String>,
+        warning_percent: f64,
+        critical_percent: f64,
+    },
+    Memory {
+        warning_percent: f64,
+        critical_percent: f64,
+    },
+    Cpu {
+        warning_percent: f64,
+        critical_percent: f64,
+        #[serde(default = "default_cpu_sample_seconds")]
+        sample_seconds: u64,
+    },
+}
+
+fn default_cpu_sample_seconds() -> u64 {
+    1
 }
 
 impl From<i32> for CheckResultStatus {
@@ -219,6 +252,8 @@ pub struct ApiKeyBindingSpec {
     pub role: UserRole,
     pub secret_name: Option<String>,
     pub check_groups: Option<Vec<String>>,
+    pub agent_target: Option<String>,
+    pub agent_targets: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, ToSchema, PartialEq, Eq)]
@@ -240,8 +275,14 @@ pub struct Secret {
 pub struct PinglowCheck {
     pub passive: bool,
     pub script: Option<ScriptSpec>,
+    #[serde(default)]
+    pub collector: Option<BuiltinCollector>,
     pub interval: Option<u64>,
     pub check_name: String,
+    #[serde(default = "default_run_on")]
+    pub run_on: String,
+    #[serde(default)]
+    pub expires_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub group_id: Option<String>,
     #[serde(default)]
@@ -250,6 +291,10 @@ pub struct PinglowCheck {
     pub telegram_channels: Vec<ConcreteTelegramChannel>,
     pub mute_notifications: Option<bool>,
     pub mute_notifications_until: Option<DateTime<Utc>>,
+}
+
+fn default_run_on() -> String {
+    "cluster".to_owned()
 }
 
 #[derive(Clone, Debug)]
@@ -297,6 +342,31 @@ mod tests {
 
         assert_eq!(check.group_id, None);
         assert_eq!(check.group_name, None);
+    }
+
+    #[test]
+    fn builtin_collector_uses_camel_case_configuration_fields() {
+        let collector = BuiltinCollector::Disk {
+            paths: vec!["/".to_owned()],
+            exclude_mount_points: vec!["/backup".to_owned()],
+            exclude_filesystem_types: vec!["tmpfs".to_owned()],
+            warning_percent: 80.0,
+            critical_percent: 90.0,
+        };
+        let json = serde_json::to_string(&collector).unwrap();
+        assert!(json.contains("\"excludeMountPoints\""));
+        assert!(json.contains("\"warningPercent\""));
+        assert_eq!(
+            serde_json::from_str::<BuiltinCollector>(&json).unwrap(),
+            collector
+        );
+    }
+
+    #[test]
+    fn builtin_collector_rejects_unknown_configuration_fields() {
+        let json =
+            r#"{"type":"memory","warningPercent":80,"criticalPercent":90,"warnngPercent":85}"#;
+        assert!(serde_json::from_str::<BuiltinCollector>(json).is_err());
     }
 
     #[test]
@@ -348,8 +418,11 @@ mod tests {
         let check1 = PinglowCheck {
             passive: true,
             script: None,
+            collector: None,
             interval: Some(300),
             check_name: "check1".to_string(),
+            run_on: "cluster".to_owned(),
+            expires_at: None,
             group_id: None,
             group_name: None,
             secrets: None,
@@ -361,8 +434,11 @@ mod tests {
         let check2 = PinglowCheck {
             passive: true,
             script: None,
+            collector: None,
             interval: Some(300),
             check_name: "check2".to_string(),
+            run_on: "cluster".to_owned(),
+            expires_at: None,
             group_id: None,
             group_name: None,
             secrets: None,
@@ -393,8 +469,11 @@ mod tests {
         let check1 = PinglowCheck {
             passive: true,
             script: None,
+            collector: None,
             interval: Some(300),
             check_name: "check1".to_string(),
+            run_on: "cluster".to_owned(),
+            expires_at: None,
             group_id: None,
             group_name: None,
             secrets: None,
@@ -406,8 +485,11 @@ mod tests {
         let check2 = PinglowCheck {
             passive: true,
             script: None,
+            collector: None,
             interval: Some(300),
             check_name: "check2".to_string(),
+            run_on: "cluster".to_owned(),
+            expires_at: None,
             group_id: None,
             group_name: None,
             secrets: None,
@@ -434,6 +516,8 @@ mod tests {
             role: UserRole::Operator,
             secret_name: Some("my-secret".to_string()),
             check_groups: Some(vec!["home".to_string()]),
+            agent_target: None,
+            agent_targets: None,
         };
         assert_eq!(binding.role, UserRole::Operator);
         assert_eq!(binding.secret_name, Some("my-secret".to_string()));
@@ -446,8 +530,25 @@ mod tests {
             role: UserRole::Admin,
             secret_name: None,
             check_groups: None,
+            agent_target: None,
+            agent_targets: None,
         };
         assert_eq!(binding.role, UserRole::Admin);
         assert_eq!(binding.secret_name, None);
+    }
+
+    #[test]
+    fn api_key_binding_deserializes_multiple_agent_targets() {
+        let binding: ApiKeyBindingSpec = serde_json::from_value(serde_json::json!({
+            "role": "operator",
+            "agent_targets": ["nas", "linux-hosts"]
+        }))
+        .unwrap();
+
+        assert_eq!(
+            binding.agent_targets,
+            Some(vec!["nas".to_owned(), "linux-hosts".to_owned()])
+        );
+        assert_eq!(binding.agent_target, None);
     }
 }

@@ -8,7 +8,7 @@ use tokio::sync::RwLock;
 
 use dashmap::DashMap;
 
-use pinglow_common::{CheckResultStatus, PinglowCheck};
+use pinglow_common::{BuiltinCollector, CheckResultStatus, PinglowCheck};
 
 pub type SharedPinglowChecks = Arc<RwLock<HashMap<String, Arc<PinglowCheck>>>>;
 pub type SharedChecks = Arc<DashMap<String, Arc<Check>>>;
@@ -39,6 +39,8 @@ pub struct TelegramChannelSpec {
 pub struct CheckSpec {
     pub groupRef: Option<String>,
     pub scriptRef: Option<String>,
+    pub collector: Option<BuiltinCollector>,
+    pub runOn: Option<String>,
     pub interval: Option<u64>,
     pub secretRefs: Option<Vec<String>>,
     pub telegramChannelRefs: Option<Vec<String>>,
