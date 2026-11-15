@@ -8,6 +8,6 @@ repository.workspace = true
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
-libc = "0.2"
+libc = "0.2.191"
 pinglow-common = { path = "../common" }
 tokio.workspace = true
