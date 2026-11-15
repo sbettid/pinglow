@@ -87,13 +87,13 @@ spec:
 apiVersion: pinglow.io/v1alpha1
 kind: Check
 metadata:
-  name: pinglow-dev-host-cpu
+  name: pinglow-dev-host-load
 spec:
   groupRef: development
   runOn: agent/dev-host
   interval: 60
   collector:
-    type: cpu
-    sampleSeconds: 1
-    warningPercent: 80
-    criticalPercent: 90
+    type: load
+    periodMinutes: 5
+    warningLoad: 2
+    criticalLoad: 4

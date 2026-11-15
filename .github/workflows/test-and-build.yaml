@@ -302,7 +302,7 @@ jobs:
             mkdir -p "$stage"
             cp "release-assets/agent/$arch/pinglow-agent" "$stage/"
             cp src/pinglow-agent/agent.example.yaml "$stage/agent.example.yaml"
-            cp src/pinglow-agent/systemd/pinglow-agent.service "$stage/"
+            cp docs/static/downloads/pinglow-agent.service "$stage/"
             cp docs/docs/deployment/agent.md "$stage/INSTALL.md"
             tar -C "$stage" -czf "release-assets/packages/pinglow-agent-${VERSION}-linux-${arch}.tar.gz" .
           done

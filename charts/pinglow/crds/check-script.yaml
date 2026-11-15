@@ -110,7 +110,6 @@ spec:
                 agent_targets:
                   type: array
                   minItems: 1
-                  uniqueItems: true
                   items:
                     type: string
                     pattern: "^[A-Za-z0-9-]+$"
@@ -192,7 +191,7 @@ spec:
                   properties:
                     type:
                       type: string
-                      enum: [disk, memory, cpu]
+                      enum: [disk, memory, load]
                     paths:
                       type: array
                       items:
@@ -214,17 +213,32 @@ spec:
                       type: number
                       minimum: 0
                       maximum: 100
-                    sampleSeconds:
+                    warningLoad:
+                      type: number
+                      minimum: 0
+                    criticalLoad:
+                      type: number
+                      minimum: 0
+                    periodMinutes:
                       type: integer
-                      minimum: 1
-                      maximum: 60
+                      enum: [1, 5, 15]
                   x-kubernetes-validations:
                     - rule: "self.type != 'disk' || (has(self.paths) && self.paths.all(path, path.startsWith('/')) && has(self.warningPercent) && has(self.criticalPercent))"
                       message: "Disk collectors require paths and warningPercent/criticalPercent."
-                    - rule: "self.type == 'disk' || (has(self.warningPercent) && has(self.criticalPercent))"
-                      message: "Memory and CPU collectors require warningPercent/criticalPercent."
+                    - rule: "self.type == 'disk' || (!has(self.paths) && !has(self.excludeMountPoints) && !has(self.excludeFilesystemTypes))"
+                      message: "Disk-only fields may only be set for disk collectors."
+                    - rule: "self.type != 'memory' || (has(self.warningPercent) && has(self.criticalPercent))"
+                      message: "Memory collectors require warningPercent/criticalPercent."
+                    - rule: "self.type != 'load' || (has(self.warningLoad) && has(self.criticalLoad))"
+                      message: "Load collectors require warningLoad/criticalLoad."
+                    - rule: "self.type == 'load' || (!has(self.warningLoad) && !has(self.criticalLoad) && !has(self.periodMinutes))"
+                      message: "Load-only fields may only be set for load collectors."
+                    - rule: "self.type != 'load' || (!has(self.warningPercent) && !has(self.criticalPercent))"
+                      message: "Load collectors use warningLoad/criticalLoad, not percentage thresholds."
                     - rule: "!has(self.warningPercent) || !has(self.criticalPercent) || self.warningPercent <= self.criticalPercent"
                       message: "warningPercent must not exceed criticalPercent."
+                    - rule: "!has(self.warningLoad) || !has(self.criticalLoad) || self.warningLoad <= self.criticalLoad"
+                      message: "warningLoad must not exceed criticalLoad."
                 runOn:
                   type: string
                   default: cluster

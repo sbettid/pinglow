@@ -83,11 +83,83 @@ spec:
     criticalPercent: 90
 ```
 
-The initial collectors are `disk`, `memory`, and `cpu`. Disk checks inspect the filesystems containing the configured paths, deduplicate paths on the same filesystem, and support excluding mount points and filesystem types. Memory reports used percentage and available GiB. CPU reports usage sampled over `sampleSeconds` (1–60, default 1). Thresholds use inclusive warning/critical percentages.
+Pinglow provides `disk`, `memory`, and `load` collectors. Each emits a readable
+summary followed by numeric performance data in the same `output|key=value`
+format used by script checks. Threshold checks are inclusive: a value at the
+critical threshold is CRITICAL; otherwise a value at the warning threshold is
+WARNING.
 
-Collector output includes a readable summary followed by comma-separated numeric performance data, for example `Disk /mnt/data: 72.4% used, 38.2 GiB free|disk_mnt_data_used_pct=72.4,disk_mnt_data_free_gib=38.2`.
+The load collector replaces the former CPU-utilization collector. Migrate
+existing `type: cpu` checks to `type: load` and configure load-specific
+thresholds.
 
-Collectors observe the Linux environment visible to the process. Disk paths refer to the runner container's filesystem view when run in-cluster; procfs CPU and memory values may be node-wide rather than cgroup-limited. Target an agent when you specifically want to monitor that host's filesystem and local resources.
+### Disk collector
+
+| Parameter | Required | Meaning |
+| --- | --- | --- |
+| `paths` | Yes | One or more absolute paths. The collector checks the filesystem containing each path and deduplicates paths on the same filesystem. |
+| `excludeMountPoints` | No | Exact mount points to skip. |
+| `excludeFilesystemTypes` | No | Filesystem types to skip, such as `tmpfs` or `proc`. |
+| `warningPercent` | Yes | Used-space percentage at which the result becomes WARNING; range 0–100. |
+| `criticalPercent` | Yes | Used-space percentage at which the result becomes CRITICAL; range 0–100 and must be at least `warningPercent`. |
+
+For example:
+
+```yaml
+collector:
+  type: disk
+  paths: ["/", "/mnt/data"]
+  excludeMountPoints: ["/mnt/backup"]
+  excludeFilesystemTypes: ["tmpfs", "proc", "sysfs"]
+  warningPercent: 80
+  criticalPercent: 90
+```
+
+### Memory collector
+
+| Parameter | Required | Meaning |
+| --- | --- | --- |
+| `warningPercent` | Yes | Used-memory percentage at which the result becomes WARNING; range 0–100. |
+| `criticalPercent` | Yes | Used-memory percentage at which the result becomes CRITICAL; range 0–100 and must be at least `warningPercent`. |
+
+The collector reads Linux `/proc/meminfo` and reports used percentage and
+available GiB. For example:
+
+```yaml
+collector:
+  type: memory
+  warningPercent: 80
+  criticalPercent: 90
+```
+
+### Load collector
+
+| Parameter | Required | Meaning |
+| --- | --- | --- |
+| `periodMinutes` | No | Selects the load average used for both status and output: `1`, `5`, or `15` minutes. Defaults to `1`. |
+| `warningLoad` | Yes | Selected load average at which the result becomes WARNING; must be non-negative. |
+| `criticalLoad` | Yes | Selected load average at which the result becomes CRITICAL; must be non-negative and at least `warningLoad`. |
+
+The collector reads Linux `/proc/loadavg`. Load average is the average number
+of runnable or uninterruptible tasks, not CPU utilization, so thresholds are
+raw load values rather than percentages and should be tuned for the host.
+For example, this check uses and reports only the five-minute average:
+
+```yaml
+collector:
+  type: load
+  periodMinutes: 5
+  warningLoad: 2
+  criticalLoad: 4
+```
+
+Its output is similar to `Load average (5 min): 0.31|load_5m=0.31`.
+
+Collectors observe the Linux environment visible to the process. Disk paths
+refer to the runner container's filesystem view when run in-cluster; procfs
+load and memory values may be node-wide rather than cgroup-limited. Target an
+agent when you specifically want to monitor that host's filesystem and local
+resources.
 
 ## Execution targets and scripts
 

@@ -460,6 +460,7 @@ fn invalid_target_check() -> status::Custom<String> {
 pub struct SimpleCheckResultDto {
     pub check_name: String,
     pub passive: bool,
+    pub run_on: String,
     pub output: String,
     pub status: CheckResultStatus,
     pub timestamp: Option<DateTime<Utc>>,
@@ -525,6 +526,7 @@ pub async fn get_check_status(
         return Some(Json(SimpleCheckResultDto {
             check_name: target_check.to_string(),
             passive: check.passive,
+            run_on: check.run_on.clone(),
             output: "Check still needs to be executed".to_owned(),
             status: CheckResultStatus::Pending,
             timestamp: None,
@@ -537,6 +539,7 @@ pub async fn get_check_status(
     Some(Json(SimpleCheckResultDto {
         check_name: target_check.to_string(),
         passive: check.passive,
+        run_on: check.run_on.clone(),
         output: last_check_result.get("output"),
         status: CheckResultStatus::from(check_status),
         timestamp: last_check_result.get("timestamp"),
@@ -1215,6 +1218,25 @@ mod tests {
         let dto = SimpleCheckDto::from(&Arc::new(check));
         assert!(!dto.passive);
         assert_eq!(dto.interval, Some(60));
+    }
+
+    #[test]
+    fn check_status_response_includes_execution_target() {
+        let response = SimpleCheckResultDto {
+            check_name: "group-check".to_owned(),
+            passive: false,
+            run_on: "agent/linux-hosts".to_owned(),
+            output: "OK".to_owned(),
+            status: CheckResultStatus::Ok,
+            timestamp: None,
+            notifications_muted: None,
+            notifications_muted_until: None,
+        };
+
+        assert_eq!(
+            serde_json::to_value(response).unwrap()["run_on"],
+            "agent/linux-hosts"
+        );
     }
 
     #[test]

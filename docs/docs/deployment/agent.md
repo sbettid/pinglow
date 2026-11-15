@@ -2,6 +2,8 @@
 sidebar_position: 5
 ---
 
+import useBaseUrl from '@docusaurus/useBaseUrl';
+
 # Pinglow agent
 
 The agent is a Linux service that connects outbound to Pinglow's controller using HTTPS long-polling. It does not connect to Redis or TimescaleDB. The Helm chart provides an internal `ClusterIP` service only; it creates no Ingress or LoadBalancer. To reach a remote host, expose the controller API through a private VPN or an operator-managed HTTPS reverse proxy. Do not expose Redis.
@@ -81,6 +83,6 @@ sudo systemctl enable --now pinglow-agent
 sudo journalctl -u pinglow-agent -f
 ```
 
-The service runs as `pinglow-agent`, not root. Its systemd unit grants only `CAP_SETUID`, used to drop script subprocesses to the `nobody` UID; the subprocess capabilities are cleared. Built-in collectors run in the agent process. Grant additional read access narrowly with groups or ACLs; do not run the agent as root to make a check pass.
+The <a href={useBaseUrl('/downloads/pinglow-agent.service')} download>systemd unit is available to download</a>. It is also included in each agent release archive. The service runs as `pinglow-agent`, not root. Its unit grants only `CAP_SETUID`, used to drop script subprocesses to the `nobody` UID; the subprocess capabilities are cleared. Built-in collectors run in the agent process. Grant additional read access narrowly with groups or ACLs; do not run the agent as root to make a check pass.
 
 The allowlist is an explicit host-owner approval boundary, not a sandbox. An allowlisted script can execute code as the `nobody` user and may receive the Check's referenced secrets. Review changes to allowed Checks and rotate the API key by updating the binding and the host's key file.

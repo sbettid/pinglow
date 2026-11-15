@@ -41,15 +41,15 @@ pub enum BuiltinCollector {
         warning_percent: f64,
         critical_percent: f64,
     },
-    Cpu {
-        warning_percent: f64,
-        critical_percent: f64,
-        #[serde(default = "default_cpu_sample_seconds")]
-        sample_seconds: u64,
+    Load {
+        #[serde(default = "default_load_period_minutes")]
+        period_minutes: u8,
+        warning_load: f64,
+        critical_load: f64,
     },
 }
 
-fn default_cpu_sample_seconds() -> u64 {
+fn default_load_period_minutes() -> u8 {
     1
 }
 
@@ -359,6 +359,30 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<BuiltinCollector>(&json).unwrap(),
             collector
+        );
+    }
+
+    #[test]
+    fn load_collector_uses_camel_case_fields_and_defaults_to_one_minute() {
+        let json = r#"{"type":"load","periodMinutes":5,"warningLoad":2,"criticalLoad":4}"#;
+        let collector: BuiltinCollector = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            collector,
+            BuiltinCollector::Load {
+                period_minutes: 5,
+                warning_load: 2.0,
+                critical_load: 4.0,
+            }
+        );
+
+        let json = r#"{"type":"load","warningLoad":2,"criticalLoad":4}"#;
+        assert_eq!(
+            serde_json::from_str::<BuiltinCollector>(json).unwrap(),
+            BuiltinCollector::Load {
+                period_minutes: 1,
+                warning_load: 2.0,
+                critical_load: 4.0,
+            }
         );
     }
 

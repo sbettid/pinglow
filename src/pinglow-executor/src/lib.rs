@@ -276,31 +276,30 @@ async fn execute_collector(collector: BuiltinCollector) -> Result<(String, Check
                 status,
             ))
         }
-        BuiltinCollector::Cpu {
-            warning_percent,
-            critical_percent,
-            sample_seconds,
+        BuiltinCollector::Load {
+            period_minutes,
+            warning_load,
+            critical_load,
         } => {
-            validate_thresholds(warning_percent, critical_percent)?;
-            if !(1..=60).contains(&sample_seconds) {
-                bail!("CPU sampleSeconds must be between 1 and 60");
-            }
-            let first = read_cpu_counters()?;
-            tokio::time::sleep(Duration::from_secs(sample_seconds)).await;
-            let second = read_cpu_counters()?;
-            let total = second.0.saturating_sub(first.0);
-            let idle = second.1.saturating_sub(first.1);
-            if total == 0 {
-                bail!("Could not calculate CPU usage from /proc/stat");
-            }
-            let used_percent = (100.0 * total.saturating_sub(idle) as f64) / total as f64;
-            let status = threshold_status(used_percent, warning_percent, critical_percent);
+            validate_load_thresholds(warning_load, critical_load)?;
+            let averages = read_load_averages()?;
+            let (metric_name, threshold_value) = load_average_for_period(averages, period_minutes)?;
+            let status = threshold_status(threshold_value, warning_load, critical_load);
             Ok((
-                format!("CPU: {used_percent:.1}% used|cpu_used_pct={used_percent:.1}"),
+                format!(
+                    "Load average ({period_minutes} min): {threshold_value:.2}|{metric_name}={threshold_value:.2}"
+                ),
                 status,
             ))
         }
     }
+}
+
+fn validate_load_thresholds(warning: f64, critical: f64) -> Result<()> {
+    if !warning.is_finite() || !critical.is_finite() || warning < 0.0 || warning > critical {
+        bail!("Load thresholds must satisfy 0 <= warningLoad <= criticalLoad");
+    }
+    Ok(())
 }
 
 fn validate_thresholds(warning: f64, critical: f64) -> Result<()> {
@@ -360,23 +359,34 @@ fn memory_usage() -> Result<(f64, f64)> {
     Ok((used_percent, available as f64 / 1024.0 / 1024.0))
 }
 
-fn read_cpu_counters() -> Result<(u64, u64)> {
-    let contents = fs::read_to_string("/proc/stat").context("reading /proc/stat")?;
-    let cpu_line = contents
-        .lines()
-        .find(|line| line.starts_with("cpu "))
-        .ok_or_else(|| anyhow!("aggregate CPU counters missing from /proc/stat"))?;
-    let values: Vec<u64> = cpu_line
+fn read_load_averages() -> Result<[f64; 3]> {
+    let contents = fs::read_to_string("/proc/loadavg").context("reading /proc/loadavg")?;
+    parse_load_averages(&contents)
+}
+
+fn parse_load_averages(contents: &str) -> Result<[f64; 3]> {
+    let values: Vec<f64> = contents
         .split_whitespace()
-        .skip(1)
-        .map(str::parse)
+        .take(3)
+        .map(|value| value.parse::<f64>().context("parsing load average"))
         .collect::<std::result::Result<_, _>>()?;
-    if values.len() < 4 {
-        bail!("Invalid aggregate CPU counters in /proc/stat");
+    if values.len() != 3
+        || values
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
+    {
+        bail!("Invalid load averages in /proc/loadavg");
     }
-    let total = values.iter().take(8).sum();
-    let idle = values[3] + values.get(4).copied().unwrap_or_default();
-    Ok((total, idle))
+    Ok([values[0], values[1], values[2]])
+}
+
+fn load_average_for_period(averages: [f64; 3], period_minutes: u8) -> Result<(&'static str, f64)> {
+    match period_minutes {
+        1 => Ok(("load_1m", averages[0])),
+        5 => Ok(("load_5m", averages[1])),
+        15 => Ok(("load_15m", averages[2])),
+        _ => bail!("Load periodMinutes must be one of 1, 5, or 15"),
+    }
 }
 
 #[derive(Debug)]
@@ -510,10 +520,54 @@ mod tests {
     }
 
     #[test]
-    fn parses_memory_and_cpu_counters_from_linux_procfs() {
+    fn parses_memory_and_load_averages_from_linux_procfs() {
         assert!(memory_usage().unwrap().0 >= 0.0);
-        let (total, idle) = read_cpu_counters().unwrap();
-        assert!(total >= idle);
+        assert_eq!(
+            parse_load_averages("1.25 0.75 0.5 2/200 1234").unwrap(),
+            [1.25, 0.75, 0.5]
+        );
+        assert!(parse_load_averages("1.25 0.75").is_err());
+        assert!(parse_load_averages("1.25 NaN 0.5").is_err());
+        assert!(read_load_averages()
+            .unwrap()
+            .iter()
+            .all(|value| *value >= 0.0));
+    }
+
+    #[test]
+    fn load_collector_selects_the_configured_average_and_rejects_invalid_periods() {
+        let averages = [1.0, 5.0, 15.0];
+        assert_eq!(
+            load_average_for_period(averages, 1).unwrap(),
+            ("load_1m", 1.0)
+        );
+        assert_eq!(
+            load_average_for_period(averages, 5).unwrap(),
+            ("load_5m", 5.0)
+        );
+        assert_eq!(
+            load_average_for_period(averages, 15).unwrap(),
+            ("load_15m", 15.0)
+        );
+        assert!(load_average_for_period(averages, 10).is_err());
+        assert!(validate_load_thresholds(3.0, 2.0).is_err());
+    }
+
+    #[tokio::test]
+    async fn load_collector_reports_only_the_selected_average() {
+        let (output, status) = execute_collector(BuiltinCollector::Load {
+            period_minutes: 5,
+            warning_load: 0.0,
+            critical_load: f64::MAX,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(status, CheckResultStatus::Warning);
+        assert!(output.starts_with("Load average (5 min): "));
+        assert!(output.contains("|load_5m="));
+        assert!(!output.contains("load_1m="));
+        assert!(!output.contains("load_15m="));
     }
 
     #[tokio::test]

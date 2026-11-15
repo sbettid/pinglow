@@ -8,6 +8,7 @@ pub struct PinglowRunnerConfig {
     pub checks_base_path: String,
     pub task_claim_idle_ms: u64,
     pub execution_timeout_seconds: u64,
+    pub drop_privileges: bool,
 }
 
 /**
@@ -29,5 +30,12 @@ pub fn get_config_from_env() -> PinglowRunnerConfig {
                     .expect("EXECUTION_TIMEOUT_SECONDS must be a number")
             })
             .unwrap_or(300),
+        drop_privileges: env::var("RUNNER_DROP_PRIVILEGES")
+            .map(|value| {
+                value
+                    .parse()
+                    .expect("RUNNER_DROP_PRIVILEGES must be true or false")
+            })
+            .unwrap_or(true),
     }
 }

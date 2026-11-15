@@ -167,6 +167,15 @@ kubectl --context "kind-$CLUSTER_NAME" --namespace "$NAMESPACE" \
   rollout status statefulset/pinglow-dev-dependencies-timescaledb --timeout=5m
 kubectl --context "kind-$CLUSTER_NAME" --namespace "$NAMESPACE" \
   rollout status deployment/keycloak --timeout=180s
+if kubectl --context "kind-$CLUSTER_NAME" --namespace "$NAMESPACE" \
+  get checks.pinglow.io pinglow-dev-host-cpu --ignore-not-found -o name | grep -q .; then
+  # This legacy demo Check may be terminating while its local controller is stopped.
+  kubectl --context "kind-$CLUSTER_NAME" --namespace "$NAMESPACE" \
+    patch checks.pinglow.io pinglow-dev-host-cpu \
+    --type=merge -p '{"metadata":{"finalizers":[]}}'
+  kubectl --context "kind-$CLUSTER_NAME" --namespace "$NAMESPACE" \
+    delete checks.pinglow.io pinglow-dev-host-cpu --ignore-not-found --wait=false
+fi
 kubectl --context "kind-$CLUSTER_NAME" --namespace "$NAMESPACE" \
   apply -f "$ROOT_DIR/dev/demo-checks.yaml"
 kubectl --context "kind-$CLUSTER_NAME" apply -f - <<EOF
@@ -200,6 +209,7 @@ export OIDC_REDIRECT_URL="${OIDC_REDIRECT_URL:-http://localhost:5173/api/auth/ca
 export OIDC_GROUPS_CLAIM="${OIDC_GROUPS_CLAIM:-groups}"
 export OIDC_COOKIE_SECURE=false
 export RUNNER_NAME="${RUNNER_NAME:-pinglow-dev-runner}"
+export RUNNER_DROP_PRIVILEGES="${RUNNER_DROP_PRIVILEGES:-false}"
 export CHECKS_BASE_PATH="${CHECKS_BASE_PATH:-${TMPDIR:-/tmp}/pinglow-dev-checks}"
 
 start_port_forward() {
@@ -233,6 +243,7 @@ start_port_forward pinglow-dev-dependencies-timescaledb 5432 5432
 start_port_forward keycloak 8081 8080
 
 echo "Running Pinglow and its check runner locally against Kind context kind-$CLUSTER_NAME."
+echo "Local runner privilege dropping is $RUNNER_DROP_PRIVILEGES."
 echo "Starting the local dev-host agent for the script and built-in collector examples."
 echo "Start the frontend separately with: cd $ROOT_DIR/../pinglow-frontend/client && npm run dev"
 
@@ -284,7 +295,7 @@ allowedChecks:
   - pinglow-dev-agent-heartbeat
   - pinglow-dev-host-disk
   - pinglow-dev-host-memory
-  - pinglow-dev-host-cpu
+  - pinglow-dev-host-load
 checksBasePath: "$AGENT_CHECKS_BASE_PATH"
 executionTimeoutSeconds: 120
 dropPrivileges: false

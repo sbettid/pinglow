@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 use pinglow_common::{
     error::SerializeError,
     redis::{init_streams, redis_client},
@@ -24,6 +24,9 @@ pub async fn run() -> anyhow::Result<()> {
     } // conn dropped here
 
     let runner_config = get_config_from_env();
+    if !runner_config.drop_privileges {
+        warn!("Runner privilege dropping is disabled; Python checks run as the runner user");
+    }
 
     let shutdown = CancellationToken::new();
     let shutdown_signal = shutdown.clone();
@@ -52,7 +55,7 @@ pub async fn run() -> anyhow::Result<()> {
 
         let executor_config = ExecutorConfig {
             base_path: runner_config.checks_base_path.clone(),
-            drop_privileges: true,
+            drop_privileges: runner_config.drop_privileges,
             timeout: Duration::from_secs(runner_config.execution_timeout_seconds),
         };
         let connection_config = async_connection.clone();

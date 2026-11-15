@@ -30,12 +30,12 @@ that the admin group binding takes precedence over the email viewer binding.
 The heartbeat runs every minute without external dependencies, reports the
 current UTC time, and records hour/minute metrics for the performance chart.
 The agent runs an allowlisted copy of the heartbeat Check plus disk, memory,
-and CPU collectors against the local machine. Its API key is read from the
+and load collectors against the local machine. Its API key is read from the
 development cluster's generated Secret and written only to a temporary file
 removed when the helper exits. The local agent config disables the `nobody`
-privilege drop because a developer-launched process does not have `CAP_SETUID`;
-the agent remains confined to the developer's account. Do not copy that
-development setting into a systemd deployment.
+privilege drop, as does the local runner, because developer-launched processes
+do not have `CAP_SETUID`; both execute checks as the developer's account. Do
+not copy those development settings into a deployed service.
 The helper uses a temporary kubeconfig for this cluster and does not change the
 current kubectl context. Both local execution components need Python 3 with
 the `venv` module for the script examples. The user email must match the email
