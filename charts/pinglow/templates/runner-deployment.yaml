@@ -27,8 +27,8 @@ spec:
                 - SETUID
             readOnlyRootFilesystem: true
             runAsGroup: 10000
-            runAsNonRoot: true
-            runAsUser: 10000
+            runAsNonRoot: false
+            runAsUser: 0
           resources:
             {{- toYaml .Values.runner.resources | nindent 12 }}
           volumeMounts:
@@ -47,6 +47,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            - name: CHECK_UID_BASE
+              value: {{ .Values.runner.checkUidBase | quote }}
+            - name: CHECK_UID_COUNT
+              value: {{ .Values.runner.checkUidCount | quote }}
       volumes:
         - name: runner-writable
           emptyDir: {}

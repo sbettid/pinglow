@@ -6,3 +6,5 @@ allowedChecks:
   - nas-memory
 checksBasePath: /var/lib/pinglow-agent/checks
 executionTimeoutSeconds: 120
+checkUidBase: 200000
+checkUidCount: 100000

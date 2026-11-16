@@ -20,12 +20,14 @@ All the options of the chart, with their defaults, as found in `charts/pinglow/v
 ## Runner (`runner`)
 
 The runners execute the checks. Their number is only adjusted automatically when `keda.enabled=true`; otherwise `minReplicas` replicas are run.
-The chart runs the runner as UID/GID `10000` and grants it `SETUID` so check processes can run as UID `65534`. Clusters with Pod Security policies must allow this capability for the runner.
+The runner container starts as UID `0` with only `SETUID` added and all other Linux capabilities dropped. It uses this capability only to launch each script Check with its own reserved UID; the runner keeps privilege escalation disabled, uses a read-only root filesystem, and script subprocesses have their capabilities cleared. The process uses GID `10000` to access the runner work volume. Clusters with Pod Security policies must allow a root container and `SETUID` for the runner. Script workspaces use POSIX ACLs and require ACL support on the mounted filesystem. Reserve the configured UID range on cluster nodes as well as for other Pinglow processes.
 
 | Value | Default | Description |
 | --- | --- | --- |
 | `runner.minReplicas` | `1` | Minimum (and, without KEDA, fixed) number of runners. |
 | `runner.maxReplicas` | `10` | Maximum number of runners. |
+| `runner.checkUidBase` | `200000` | First UID in the reserved range used to isolate script Checks. |
+| `runner.checkUidCount` | `100000` | Number of UIDs in the reserved range. |
 | `runner.queueLengthThreshold` | `10` | Number of pending checks in the queue that triggers scaling out. |
 | `runner.activationThreshold` | `1` | Number of pending checks needed to activate scaling. |
 | `runner.pollingInterval` | `15` | How often, in seconds, KEDA checks the queue. |

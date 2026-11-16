@@ -33,7 +33,7 @@ spec:
 ```
 
 As we can see, the `Check` references a standard secret and so its keys and values will be automatically passed as environment variables to the script when it runs.
-Scripts run under a separate unprivileged user. Runner credentials are not inherited; only secrets explicitly referenced by that check are passed to its script.
+Each script Check runs under its own unprivileged UID with a private workspace. Runner credentials are not inherited; only secrets explicitly referenced by that check are passed to its script. The UID mapping is persistent, and workspace ACLs prevent one Check from accessing another Check's virtual environment or files.
 
 ```yaml
 apiVersion: pinglow.io/v1alpha1

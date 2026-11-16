@@ -4,7 +4,10 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use log::{error, info, warn};
 use pinglow_common::{CheckResultStatus, PinglowCheck};
-use pinglow_executor::{execute_check, ExecutorConfig};
+use pinglow_executor::{
+    execute_check, initialize_check_workspaces, validate_check_uid_range, ExecutorConfig,
+    DEFAULT_CHECK_UID_BASE, DEFAULT_CHECK_UID_COUNT,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
@@ -19,6 +22,10 @@ struct AgentConfig {
     execution_timeout_seconds: u64,
     #[serde(default = "default_drop_privileges")]
     drop_privileges: bool,
+    #[serde(default = "default_check_uid_base")]
+    check_uid_base: u32,
+    #[serde(default = "default_check_uid_count")]
+    check_uid_count: u32,
 }
 
 fn default_timeout() -> u64 {
@@ -27,6 +34,14 @@ fn default_timeout() -> u64 {
 
 fn default_drop_privileges() -> bool {
     true
+}
+
+fn default_check_uid_base() -> u32 {
+    DEFAULT_CHECK_UID_BASE
+}
+
+fn default_check_uid_count() -> u32 {
+    DEFAULT_CHECK_UID_COUNT
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,6 +75,13 @@ async fn main() -> Result<()> {
     .with_context(|| format!("parsing {config_path}"))?;
 
     validate_config(&config)?;
+    validate_check_uid_range(config.check_uid_base, config.check_uid_count)?;
+    initialize_check_workspaces(
+        &config.checks_base_path.to_string_lossy(),
+        config.drop_privileges,
+        config.check_uid_base,
+        config.check_uid_count,
+    )?;
     let api_key = fs::read_to_string(&config.api_key_file)
         .with_context(|| format!("reading API key file {}", config.api_key_file.display()))?
         .trim()
@@ -140,6 +162,8 @@ async fn main() -> Result<()> {
                 &ExecutorConfig {
                     base_path: config.checks_base_path.to_string_lossy().into_owned(),
                     drop_privileges: config.drop_privileges,
+                    check_uid_base: config.check_uid_base,
+                    check_uid_count: config.check_uid_count,
                     timeout: Duration::from_secs(config.execution_timeout_seconds),
                 },
             )
@@ -208,6 +232,7 @@ fn validate_config(config: &AgentConfig) -> Result<()> {
     if config.execution_timeout_seconds == 0 || config.execution_timeout_seconds > 3600 {
         bail!("executionTimeoutSeconds must be between 1 and 3600");
     }
+    validate_check_uid_range(config.check_uid_base, config.check_uid_count)?;
     let url = reqwest::Url::parse(&config.controller_url)?;
     let is_loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
     if url.scheme() != "https" && !(url.scheme() == "http" && is_loopback) {
@@ -232,6 +257,8 @@ mod tests {
             checks_base_path: "/tmp/checks".into(),
             execution_timeout_seconds: 120,
             drop_privileges,
+            check_uid_base: DEFAULT_CHECK_UID_BASE,
+            check_uid_count: DEFAULT_CHECK_UID_COUNT,
         }
     }
 
@@ -245,6 +272,13 @@ mod tests {
     fn remote_agents_require_https_and_privilege_drop() {
         assert!(validate_config(&config("https://controller.example", true)).is_ok());
         assert!(validate_config(&config("http://controller.example", true)).is_err());
+    }
+
+    #[test]
+    fn remote_agent_check_uid_range_must_be_valid() {
+        let mut agent_config = config("https://controller.example", true);
+        agent_config.check_uid_base = 0;
+        assert!(validate_config(&agent_config).is_err());
     }
 
     #[test]

@@ -2544,6 +2544,7 @@ dependencies = [
  "chrono",
  "libc",
  "pinglow-common",
+ "serde_json",
  "tokio",
 ]
 
