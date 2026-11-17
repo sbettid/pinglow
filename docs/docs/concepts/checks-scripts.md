@@ -163,7 +163,7 @@ resources.
 
 ## Execution targets and scripts
 
-`runOn` defaults to `cluster`. A Check can target an agent with `runOn: agent/nas`. The agent must be configured to allow that Check. Script-based Checks are supported on agents as well as built-in collectors; approving a script means trusting its code to execute as the agent's unprivileged service user. The allowlist is not a sandbox.
+`runOn` defaults to `cluster`. A Check can target an agent with `runOn: agent/nas`. The agent must be configured to allow that Check. Script-based Checks are supported on agents as well as built-in collectors. Approving a script grants its code execution; the allowlist controls placement, not behavior. Deployed script Checks run in a filesystem/process sandbox separate from the service, but outbound networking remains available.
 
 ## Performance data
 

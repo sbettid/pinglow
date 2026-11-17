@@ -1,7 +1,5 @@
 use std::env;
 
-use pinglow_executor::{DEFAULT_CHECK_UID_BASE, DEFAULT_CHECK_UID_COUNT};
-
 #[derive(Debug, Clone)]
 pub struct PinglowRunnerConfig {
     #[allow(dead_code)]
@@ -11,8 +9,6 @@ pub struct PinglowRunnerConfig {
     pub task_claim_idle_ms: u64,
     pub execution_timeout_seconds: u64,
     pub drop_privileges: bool,
-    pub check_uid_base: u32,
-    pub check_uid_count: u32,
 }
 
 /**
@@ -41,11 +37,5 @@ pub fn get_config_from_env() -> PinglowRunnerConfig {
                     .expect("RUNNER_DROP_PRIVILEGES must be true or false")
             })
             .unwrap_or(true),
-        check_uid_base: env::var("CHECK_UID_BASE")
-            .map(|value| value.parse().expect("CHECK_UID_BASE must be a number"))
-            .unwrap_or(DEFAULT_CHECK_UID_BASE),
-        check_uid_count: env::var("CHECK_UID_COUNT")
-            .map(|value| value.parse().expect("CHECK_UID_COUNT must be a number"))
-            .unwrap_or(DEFAULT_CHECK_UID_COUNT),
     }
 }

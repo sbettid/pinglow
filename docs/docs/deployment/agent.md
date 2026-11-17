@@ -56,7 +56,7 @@ sha256sum --check --ignore-missing SHA256SUMS
 tar -xzf "$ARCHIVE"
 ```
 
-The archive contains the agent binary, example configuration, systemd unit, and a copy of these installation instructions.
+The archive contains the agent binary, Check sandbox launcher, example configuration, systemd unit, and a copy of these installation instructions.
 
 ### 2. Install the service
 
@@ -65,10 +65,13 @@ From the extracted archive directory, run this once to create the service accoun
 ```bash
 sudo bash -eu <<'EOF'
 useradd -r -U -d /var/lib/pinglow-agent -s /usr/sbin/nologin -m pinglow-agent
+useradd -r -U -M -d /nonexistent -s /usr/sbin/nologin pinglow-check
 install -d -o root -g pinglow-agent -m 0750 /etc/pinglow-agent
 install -d -o pinglow-agent -g pinglow-agent -m 0750 \
   /var/lib/pinglow-agent/checks
 install -o root -g root -m 0755 pinglow-agent /usr/local/bin/pinglow-agent
+install -o root -g pinglow-agent -m 0750 pinglow-check-launcher \
+  /usr/local/bin/pinglow-check-launcher
 install -o root -g root -m 0644 agent.example.yaml /etc/pinglow-agent/agent.yaml
 install -o root -g root -m 0644 pinglow-agent.service \
   /etc/systemd/system/pinglow-agent.service
@@ -88,7 +91,7 @@ sudo chmod 0600 /etc/pinglow-agent/api-key
 sudo setfacl -m u:pinglow-agent:r /etc/pinglow-agent/api-key
 ```
 
-Do not put the key in the YAML file or command-line arguments. The ACL keeps the key unavailable to check subprocesses, which run under separate unprivileged UIDs.
+Do not put the key in the YAML file or command-line arguments. The ACL keeps the key unavailable to Check subprocesses.
 
 Example `/etc/pinglow-agent/agent.yaml`:
 
@@ -101,13 +104,15 @@ allowedChecks:
   - nas-memory
 checksBasePath: /var/lib/pinglow-agent/checks
 executionTimeoutSeconds: 120
-checkUidBase: 200000
-checkUidCount: 100000
 ```
 
 Replace `controllerUrl` with the HTTPS URL reachable from this host. Set `allowedChecks` to the exact names of the Checks this host is approved to run. Each Check must also use `runOn: agent/<target>`, where `<target>` is listed in this agent's `ApiKeyBinding`.
 
-Keep `dropPrivileges` enabled (the default) in service deployments. It requires the unit's restricted `CAP_SETUID` capability and runs each Check as a distinct unprivileged UID. Reserve the configured `checkUidBase`/`checkUidCount` range for Pinglow and ensure it does not overlap with local users or other services. The agent stores the stable Check-to-UID mapping in its checks directory; do not change the range or delete only the mapping file. To reset it, stop the agent and remove the entire `checksBasePath` so old workspace ACLs cannot be reused under a different mapping. Disabling privilege dropping is intended only for localhost development; scripts then run with the agent process's own user permissions. Do not use that setting for a production host.
+Keep `dropPrivileges` enabled (the default) in service deployments. Each script Check runs as the dedicated `pinglow-check` account, distinct from `pinglow-agent`; all supplementary groups and capabilities are cleared. The service unit needs only `CAP_SETUID` and `CAP_SETGID` to switch to that account. The same account is reused for every Check, while each execution receives its own Landlock domain and private writable workspace, so no UID range or per-Check account allocation is needed.
+
+Landlock ABI v6 is required; the agent fails closed at startup if the host kernel or service restrictions do not support it. This requires a Linux kernel with Landlock ABI v6 (available starting with Linux 6.12). The sandbox grants read-only access to the Python/system runtime, selected certificate and resolver files, the Check's own `/proc` entry and selected system metrics, and `/sys`; it grants write access only to that Check's `work-sandboxed` directory. A seccomp filter blocks cross-process inspection syscalls so Checks sharing the worker account cannot inspect one another's process memory. Outbound networking remains available for monitoring and Python package installation. Check execution also requires POSIX ACL support on the filesystem containing `checksBasePath`.
+
+The agent's API key is read only by the agent process. Script subprocesses receive only the secrets explicitly configured for their Check; Landlock and the distinct UID prevent them from reading the agent's environment or files, and per-process `/proc` restrictions prevent reading another Check's environment. Landlock ABI v6 scopes signals and abstract Unix sockets; pathname Unix-socket connections still follow the host's normal DAC permissions, so do not make sensitive sockets accessible to `pinglow-check`. Because monitoring checks need outbound networking, Landlock does not filter destination IPs; block cloud metadata and other credential endpoints with the host firewall or network policy. Disabling privilege dropping is intended only for localhost development; Landlock and environment clearing still apply, but the script runs under the developer's UID. Do not use that setting for a production host.
 
 ### 4. Start and check the service
 
@@ -119,16 +124,9 @@ sudo systemctl enable --now pinglow-agent
 sudo journalctl -u pinglow-agent -f
 ```
 
-The <a href={useBaseUrl('/downloads/pinglow-agent.service')} download>systemd unit is available to download</a>. It is also included in each agent release archive. The service runs as `pinglow-agent`, not root. Its unit grants only `CAP_SETUID`; each script subprocess gets a distinct UID and all capabilities are cleared. Workspaces are protected with per-UID POSIX ACLs, so the filesystem containing `checksBasePath` must support POSIX ACLs. Built-in collectors run in the agent process. Grant additional read access narrowly with groups or ACLs; do not run the agent as root to make a check pass.
+The <a href={useBaseUrl('/downloads/pinglow-agent.service')} download>systemd unit is available to download</a>. It is also included in each agent release archive. The service runs as `pinglow-agent`, not root. Its unit grants only `CAP_SETUID` and `CAP_SETGID`; each script subprocess uses `pinglow-check` with no capabilities, supplementary groups, or inherited non-standard file descriptors. Workspaces use POSIX ACLs and Landlock; built-in collectors run in the agent process. Grant additional host data access narrowly with ACLs; do not run the agent as root to make a check pass.
 
-On upgrade from an agent release that used a shared script UID, stop the service and remove the old checks workspaces once so stale shared virtual environments cannot be reused:
-
-```bash
-sudo systemctl stop pinglow-agent
-sudo rm -rf /var/lib/pinglow-agent/checks
-sudo install -d -o pinglow-agent -g pinglow-agent -m 0750 \
-  /var/lib/pinglow-agent/checks
-sudo systemctl start pinglow-agent
-```
+On upgrade from the per-Check UID design, the agent leaves old `work` and `work-isolated` data untouched but locks those directories down. Script Checks use a fresh `work-sandboxed` directory, so Python requirements may be downloaded again. No manual deletion or UID mapping migration is required.
+Existing `checkUidBase` and `checkUidCount` entries in `agent.yaml` are accepted but ignored; remove them when convenient.
 
 The allowlist is an explicit host-owner approval boundary, not a sandbox. An allowlisted script can execute code as its Check's unprivileged UID and may receive that Check's referenced secrets. Review changes to allowed Checks and rotate the API key by updating the binding and the host's key file.

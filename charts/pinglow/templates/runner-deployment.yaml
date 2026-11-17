@@ -25,6 +25,7 @@ spec:
                 - ALL
               add:
                 - SETUID
+                - SETGID
             readOnlyRootFilesystem: true
             runAsGroup: 10000
             runAsNonRoot: false
@@ -47,10 +48,6 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
-            - name: CHECK_UID_BASE
-              value: {{ .Values.runner.checkUidBase | quote }}
-            - name: CHECK_UID_COUNT
-              value: {{ .Values.runner.checkUidCount | quote }}
       volumes:
         - name: runner-writable
           emptyDir: {}

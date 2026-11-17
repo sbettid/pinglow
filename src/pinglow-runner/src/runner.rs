@@ -10,9 +10,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     config::get_config_from_env,
-    executor::{
-        execute_check, initialize_check_workspaces, validate_check_uid_range, ExecutorConfig,
-    },
+    executor::{execute_check, initialize_check_workspaces, ExecutorConfig},
     queue::fetch_task,
 };
 
@@ -26,12 +24,9 @@ pub async fn run() -> anyhow::Result<()> {
     } // conn dropped here
 
     let runner_config = get_config_from_env();
-    validate_check_uid_range(runner_config.check_uid_base, runner_config.check_uid_count)?;
     initialize_check_workspaces(
         &runner_config.checks_base_path,
         runner_config.drop_privileges,
-        runner_config.check_uid_base,
-        runner_config.check_uid_count,
     )?;
     if !runner_config.drop_privileges {
         warn!("Runner privilege dropping is disabled; Python checks run as the runner user");
@@ -65,8 +60,6 @@ pub async fn run() -> anyhow::Result<()> {
         let executor_config = ExecutorConfig {
             base_path: runner_config.checks_base_path.clone(),
             drop_privileges: runner_config.drop_privileges,
-            check_uid_base: runner_config.check_uid_base,
-            check_uid_count: runner_config.check_uid_count,
             timeout: Duration::from_secs(runner_config.execution_timeout_seconds),
         };
         let connection_config = async_connection.clone();

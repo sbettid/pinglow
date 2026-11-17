@@ -29,9 +29,6 @@ pinglow:
 runner:
   minReplicas: 1
   maxReplicas: 10
-  # Reserve this range for isolated script-check UIDs on the runner.
-  checkUidBase: 200000
-  checkUidCount: 100000
   # Queue length threshold for scaling
   queueLengthThreshold: 10
   # Minimum queue length to activate scaling

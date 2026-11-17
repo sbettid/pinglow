@@ -10,12 +10,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN addgroup --system --gid 10000 pinglow-runner && \
-    adduser --system --uid 10000 --ingroup pinglow-runner --home /home/pinglow-runner pinglow-runner
+    adduser --system --uid 10000 --ingroup pinglow-runner --home /home/pinglow-runner pinglow-runner && \
+    addgroup --system --gid 10001 pinglow-check && \
+    adduser --system --uid 10001 --ingroup pinglow-check --home /nonexistent \
+      --no-create-home --disabled-password --disabled-login pinglow-check
 
 COPY --from=bin_amd64 ${BINARY_NAME} /usr/local/bin/pinglow-runner
 COPY --from=bin_arm64 ${BINARY_NAME} /usr/local/bin/pinglow-runner
+COPY --from=bin_amd64 pinglow-check-launcher /usr/local/bin/pinglow-check-launcher
+COPY --from=bin_arm64 pinglow-check-launcher /usr/local/bin/pinglow-check-launcher
 
-RUN chown pinglow-runner:pinglow-runner /usr/local/bin/pinglow-runner && chmod 755 /usr/local/bin/pinglow-runner
+RUN chown pinglow-runner:pinglow-runner /usr/local/bin/pinglow-runner && \
+    chmod 755 /usr/local/bin/pinglow-runner && \
+    chown root:pinglow-runner /usr/local/bin/pinglow-check-launcher && \
+    chmod 750 /usr/local/bin/pinglow-check-launcher
 
 USER pinglow-runner
 WORKDIR /home/pinglow-runner

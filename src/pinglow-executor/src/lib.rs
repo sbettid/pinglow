@@ -1,161 +1,20 @@
-use std::{
-    collections::BTreeMap,
-    ffi::CString,
-    fs,
-    io::Write,
-    os::unix::{
-        ffi::OsStrExt,
-        fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
-        process::CommandExt,
-    },
-    path::{Path, PathBuf},
-    process::Stdio,
-    sync::Mutex,
-    time::Duration,
-};
+use std::{collections::BTreeMap, ffi::CString, fs, process::Stdio, time::Duration};
 
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::Utc;
 use pinglow_common::{BuiltinCollector, CheckResult, CheckResultStatus, PinglowCheck};
 use tokio::{process::Command, time::timeout};
 
-pub const DEFAULT_CHECK_UID_BASE: u32 = 200_000;
-pub const DEFAULT_CHECK_UID_COUNT: u32 = 100_000;
-const CHECK_UID_MAP_FILE: &str = ".check-uids.json";
-const WORK_DIR_NAME: &str = "work-isolated";
-const LINUX_CAPABILITY_VERSION_3: u32 = 0x20080522;
-static CHECK_UID_ALLOCATOR_LOCK: Mutex<()> = Mutex::new(());
+mod sandbox;
 
-#[repr(C)]
-struct CapHeader {
-    version: u32,
-    pid: libc::pid_t,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct CapData {
-    effective: u32,
-    permitted: u32,
-    inheritable: u32,
-}
+use sandbox::{check_command, prepare_check_sandbox, write_check_script};
+pub use sandbox::{initialize_check_workspaces, run_sandbox_launcher, CHECK_USER_NAME};
 
 #[derive(Clone, Debug)]
 pub struct ExecutorConfig {
     pub base_path: String,
     pub drop_privileges: bool,
-    pub check_uid_base: u32,
-    pub check_uid_count: u32,
     pub timeout: Duration,
-}
-
-pub fn initialize_check_workspaces(
-    base_path: &str,
-    drop_privileges: bool,
-    uid_base: u32,
-    uid_count: u32,
-) -> Result<()> {
-    if !drop_privileges {
-        return Ok(());
-    }
-    validate_check_uid_range(uid_base, uid_count)?;
-
-    fs::create_dir_all(base_path)
-        .with_context(|| format!("creating checks directory {base_path}"))?;
-    fs::set_permissions(base_path, fs::Permissions::from_mode(0o750))
-        .with_context(|| format!("setting permissions on checks directory {base_path}"))?;
-
-    let expected_owner = unsafe { libc::geteuid() };
-    let uid_end = uid_base + uid_count;
-    let uid_map = read_check_uid_map(&Path::new(base_path).join(CHECK_UID_MAP_FILE))?;
-    if uid_map
-        .values()
-        .any(|uid| !(uid_base..uid_end).contains(uid))
-    {
-        bail!(
-            "check UID mapping contains UIDs outside the configured range; remove the entire checks directory and restart the service"
-        );
-    }
-    let passwd_uids = read_passwd_uids()?;
-    if uid_map.values().any(|uid| passwd_uids.contains(uid)) {
-        bail!(
-            "check UID mapping conflicts with an account in /etc/passwd; reserve a different UID range and reset the entire checks directory"
-        );
-    }
-    if !uid_map.is_empty() {
-        let process_uids = read_process_uids()?;
-        if uid_map.values().any(|uid| process_uids.contains(uid)) {
-            bail!(
-                "a mapped check UID is already in use by a process; reserve a different UID range or stop the conflicting process"
-            );
-        }
-    }
-
-    for entry in
-        fs::read_dir(base_path).with_context(|| format!("reading checks directory {base_path}"))?
-    {
-        let entry = entry?;
-        if !entry.file_name().to_string_lossy().starts_with("check-") {
-            continue;
-        }
-
-        let file_type = entry.file_type()?;
-        if !file_type.is_dir() {
-            continue;
-        }
-
-        for name in ["work", WORK_DIR_NAME] {
-            let path = entry.path().join(name);
-            let metadata = match fs::symlink_metadata(&path) {
-                Ok(metadata) => metadata,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(error) => {
-                    return Err(error).with_context(|| format!("reading {}", path.display()))
-                }
-            };
-            if !metadata.is_dir() {
-                bail!("check workspace {} is not a directory", path.display());
-            }
-            if name == WORK_DIR_NAME {
-                let directory_name = entry.file_name();
-                let Some(check_name) = directory_name
-                    .to_string_lossy()
-                    .strip_prefix("check-")
-                    .map(str::to_owned)
-                else {
-                    bail!(
-                        "check workspace {} has an invalid parent directory name",
-                        path.display()
-                    );
-                };
-                if !uid_map.contains_key(&check_name) {
-                    bail!(
-                        "check workspace {} has no UID mapping; remove the entire checks directory and restart the service",
-                        path.display()
-                    );
-                }
-            }
-            if metadata.uid() != expected_owner {
-                bail!(
-                    "check workspace {} is owned by UID {}, expected UID {}; remove the old checks directory and restart the service",
-                    path.display(),
-                    metadata.uid(),
-                    expected_owner
-                );
-            }
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o700))
-                .with_context(|| format!("restricting legacy workspace {}", path.display()))?;
-        }
-    }
-
-    Ok(())
-}
-
-pub fn validate_check_uid_range(uid_base: u32, uid_count: u32) -> Result<()> {
-    if uid_base < 1_000 || uid_count == 0 || uid_base.checked_add(uid_count).is_none() {
-        bail!("check UID range must start at 1000 or higher and contain valid UIDs");
-    }
-    Ok(())
 }
 
 pub async fn execute_check(check: PinglowCheck, config: &ExecutorConfig) -> CheckResult {
@@ -204,56 +63,36 @@ async fn execute_script(
     secrets: Option<std::collections::HashMap<String, String>>,
     config: &ExecutorConfig,
 ) -> Result<(String, CheckResultStatus)> {
-    let check_dir = format!("{}/check-{check_name}", config.base_path);
-    let script_path = format!("{check_dir}/script.py");
-    let legacy_work_dir = format!("{check_dir}/work");
-    let work_dir = if config.drop_privileges {
-        format!("{check_dir}/{WORK_DIR_NAME}")
-    } else {
-        legacy_work_dir
-    };
-    let venv_path = format!("{work_dir}/venv");
+    let sandbox = prepare_check_sandbox(&config.base_path, check_name, config.drop_privileges)?;
+    let script_path = write_check_script(&sandbox, &script.content)?;
+    let venv_path = sandbox.work_dir.join("venv");
 
-    fs::create_dir_all(&config.base_path)?;
-    fs::set_permissions(&config.base_path, fs::Permissions::from_mode(0o750))?;
-    fs::create_dir_all(&check_dir)?;
-    fs::set_permissions(&check_dir, fs::Permissions::from_mode(0o750))?;
-    let check_uid = if config.drop_privileges {
-        let uid = allocate_check_uid(
-            &config.base_path,
-            check_name,
-            config.check_uid_base,
-            config.check_uid_count,
-        )?;
-        prepare_check_work_dir(&work_dir, uid)?;
-        uid
-    } else {
-        fs::create_dir_all(&work_dir)?;
-        unsafe { libc::geteuid() }
-    };
-    fs::write(&script_path, &script.content)?;
-    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o640))?;
-
-    let mut command = Command::new("python3");
-    configure_check_process(&mut command, &work_dir, config.drop_privileges, check_uid);
-    command.args(["-m", "venv", &venv_path]);
+    let command = check_command(
+        &sandbox,
+        "python3",
+        vec![
+            "-m".into(),
+            "venv".into(),
+            venv_path.clone().into_os_string(),
+        ],
+    )?;
     ensure_success(command, "creating Python virtual environment").await?;
 
     if let Some(requirements) = script.python_requirements {
         if !requirements.is_empty() {
-            let mut command = Command::new(format!("{venv_path}/bin/pip"));
-            configure_check_process(&mut command, &work_dir, config.drop_privileges, check_uid);
-            command.arg("install").args(requirements);
+            let mut args = vec![std::ffi::OsString::from("install")];
+            args.extend(requirements.into_iter().map(std::ffi::OsString::from));
+            let command = check_command(&sandbox, venv_path.join("bin/pip").as_os_str(), args)?;
             ensure_success(command, "installing Python requirements").await?;
         }
     }
 
-    let mut command = Command::new(format!("{venv_path}/bin/python"));
-    configure_check_process(&mut command, &work_dir, config.drop_privileges, check_uid);
-    command
-        .arg(script_path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    let mut command = check_command(
+        &sandbox,
+        venv_path.join("bin/python").as_os_str(),
+        vec![script_path.into_os_string()],
+    )?;
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
     if let Some(secrets) = secrets {
         command.envs(secrets);
     }
@@ -288,261 +127,14 @@ async fn ensure_success(mut command: Command, action: &str) -> Result<()> {
         .await
         .with_context(|| format!("{action}"))?;
     if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
         bail!(
-            "Error {action} (status: {}): {}",
+            "Error {action} (status: {}): {}{}",
             output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
+            stdout.trim(),
+            stderr.trim()
         );
-    }
-    Ok(())
-}
-
-fn configure_check_process(
-    command: &mut Command,
-    work_dir: &str,
-    drop_privileges: bool,
-    check_uid: u32,
-) {
-    command.env_clear();
-    if let Some(path) = std::env::var_os("PATH") {
-        command.env("PATH", path);
-    }
-    command
-        .env("HOME", work_dir)
-        .env("TMPDIR", work_dir)
-        .kill_on_drop(true);
-
-    if drop_privileges {
-        unsafe {
-            command.as_std_mut().pre_exec(move || {
-                if libc::setuid(check_uid) == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-
-                if libc::prctl(
-                    libc::PR_CAP_AMBIENT,
-                    libc::PR_CAP_AMBIENT_CLEAR_ALL,
-                    0,
-                    0,
-                    0,
-                ) == -1
-                {
-                    return Err(std::io::Error::last_os_error());
-                }
-
-                let header = CapHeader {
-                    version: LINUX_CAPABILITY_VERSION_3,
-                    pid: 0,
-                };
-                let data = [CapData::default(); 2];
-                if libc::syscall(libc::SYS_capset, &header, data.as_ptr()) == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-    }
-}
-
-fn allocate_check_uid(
-    base_path: &str,
-    check_name: &str,
-    uid_base: u32,
-    uid_count: u32,
-) -> Result<u32> {
-    validate_check_uid_range(uid_base, uid_count)?;
-    let uid_end = uid_base + uid_count;
-
-    let _guard = CHECK_UID_ALLOCATOR_LOCK
-        .lock()
-        .map_err(|_| anyhow!("check UID allocator lock is poisoned"))?;
-    let base_path = Path::new(base_path);
-    let map_path = base_path.join(CHECK_UID_MAP_FILE);
-    let mut uid_map = read_check_uid_map(&map_path)?;
-
-    if uid_map
-        .values()
-        .any(|uid| !(uid_base..uid_end).contains(uid))
-    {
-        bail!(
-            "check UID mapping {} contains UIDs outside the configured range; remove the entire checks directory and restart the service",
-            map_path.display()
-        );
-    }
-    let passwd_uids = read_passwd_uids()?;
-    if uid_map.values().any(|uid| passwd_uids.contains(uid)) {
-        bail!(
-            "check UID mapping {} conflicts with an account in /etc/passwd",
-            map_path.display()
-        );
-    }
-    if let Some(uid) = uid_map.get(check_name).copied() {
-        return Ok(uid);
-    }
-
-    let mut unavailable_uids = passwd_uids;
-    unavailable_uids.extend(read_process_uids()?);
-    unavailable_uids.extend(uid_map.values().copied());
-
-    let uid = (uid_base..uid_end)
-        .find(|uid| !unavailable_uids.contains(uid))
-        .ok_or_else(|| anyhow!("no available UID remains in the configured check UID range"))?;
-    uid_map.insert(check_name.to_owned(), uid);
-    write_check_uid_map(&map_path, &uid_map)?;
-    Ok(uid)
-}
-
-fn read_check_uid_map(path: &Path) -> Result<BTreeMap<String, u32>> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
-        Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
-    };
-    if !metadata.is_file() {
-        bail!("check UID mapping {} is not a regular file", path.display());
-    }
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
-        .with_context(|| format!("restricting {}", path.display()))?;
-    let contents =
-        fs::read(path).with_context(|| format!("reading check UID mapping {}", path.display()))?;
-    let uid_map: BTreeMap<String, u32> = serde_json::from_slice(&contents)
-        .with_context(|| format!("parsing check UID mapping {}", path.display()))?;
-    let mut unique_uids = std::collections::BTreeSet::new();
-    if uid_map.values().any(|uid| !unique_uids.insert(*uid)) {
-        bail!(
-            "check UID mapping {} contains duplicate UIDs",
-            path.display()
-        );
-    }
-    Ok(uid_map)
-}
-
-fn write_check_uid_map(path: &Path, uid_map: &BTreeMap<String, u32>) -> Result<()> {
-    let temp_path = path.with_extension(format!("json.{}.tmp", std::process::id()));
-    let contents = serde_json::to_vec(uid_map).context("serializing check UID mapping")?;
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&temp_path)
-        .with_context(|| format!("creating check UID mapping {}", temp_path.display()))?;
-    file.write_all(&contents)
-        .with_context(|| format!("writing check UID mapping {}", temp_path.display()))?;
-    file.sync_all()
-        .with_context(|| format!("syncing check UID mapping {}", temp_path.display()))?;
-    drop(file);
-    fs::rename(&temp_path, path)
-        .with_context(|| format!("installing check UID mapping {}", path.display()))?;
-    Ok(())
-}
-
-fn read_passwd_uids() -> Result<std::collections::BTreeSet<u32>> {
-    let mut uids = std::collections::BTreeSet::new();
-    let passwd = fs::read_to_string("/etc/passwd")
-        .context("reading /etc/passwd for check UID allocation")?;
-    for line in passwd.lines() {
-        if let Some(uid) = line.split(':').nth(2).and_then(|field| field.parse().ok()) {
-            uids.insert(uid);
-        }
-    }
-    Ok(uids)
-}
-
-fn read_process_uids() -> Result<std::collections::BTreeSet<u32>> {
-    let mut uids = std::collections::BTreeSet::new();
-    for entry in fs::read_dir("/proc").context("reading /proc for check UID allocation")? {
-        let entry = entry?;
-        if entry.file_name().to_string_lossy().parse::<u32>().is_err() {
-            continue;
-        }
-        let status_path = entry.path().join("status");
-        let status = match fs::read_to_string(&status_path) {
-            Ok(status) => status,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                return Err(error).with_context(|| format!("reading {}", status_path.display()))
-            }
-        };
-        if let Some(line) = status.lines().find(|line| line.starts_with("Uid:")) {
-            for uid in line
-                .split_whitespace()
-                .skip(1)
-                .filter_map(|value| value.parse().ok())
-            {
-                uids.insert(uid);
-            }
-        }
-    }
-
-    Ok(uids)
-}
-
-fn prepare_check_work_dir(path: &str, check_uid: u32) -> Result<()> {
-    let path = PathBuf::from(path);
-    match fs::symlink_metadata(&path) {
-        Ok(metadata) => {
-            if !metadata.is_dir() {
-                bail!("check workspace {} is not a directory", path.display());
-            }
-            let expected_owner = unsafe { libc::geteuid() };
-            if metadata.uid() != expected_owner {
-                bail!(
-                    "check workspace {} is owned by UID {}, expected UID {}; remove the old checks directory and restart the service",
-                    path.display(),
-                    metadata.uid(),
-                    expected_owner
-                );
-            }
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            fs::create_dir(&path)
-                .with_context(|| format!("creating check workspace {}", path.display()))?;
-        }
-        Err(error) => return Err(error).with_context(|| format!("reading {}", path.display())),
-    }
-
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o700))
-        .with_context(|| format!("setting permissions on {}", path.display()))?;
-    set_named_user_acl(&path, check_uid)
-}
-
-fn set_named_user_acl(path: &Path, check_uid: u32) -> Result<()> {
-    const ACL_USER_OBJ: u16 = 0x01;
-    const ACL_USER: u16 = 0x02;
-    const ACL_GROUP_OBJ: u16 = 0x04;
-    const ACL_MASK: u16 = 0x10;
-    const ACL_OTHER: u16 = 0x20;
-    const ACL_UNDEFINED_ID: u32 = u32::MAX;
-
-    let mut acl = Vec::with_capacity(4 + 5 * 8);
-    acl.extend_from_slice(&2_u32.to_le_bytes());
-    for (tag, permissions, id) in [
-        (ACL_USER_OBJ, 0b111_u16, ACL_UNDEFINED_ID),
-        (ACL_USER, 0b111_u16, check_uid),
-        (ACL_GROUP_OBJ, 0_u16, ACL_UNDEFINED_ID),
-        (ACL_MASK, 0b111_u16, ACL_UNDEFINED_ID),
-        (ACL_OTHER, 0_u16, ACL_UNDEFINED_ID),
-    ] {
-        acl.extend_from_slice(&tag.to_le_bytes());
-        acl.extend_from_slice(&permissions.to_le_bytes());
-        acl.extend_from_slice(&id.to_le_bytes());
-    }
-
-    let path_cstr = CString::new(path.as_os_str().as_bytes())
-        .with_context(|| format!("encoding workspace path {}", path.display()))?;
-    let result = unsafe {
-        libc::setxattr(
-            path_cstr.as_ptr(),
-            b"system.posix_acl_access\0".as_ptr().cast(),
-            acl.as_ptr().cast(),
-            acl.len(),
-            0,
-        )
-    };
-    if result == -1 {
-        return Err(std::io::Error::last_os_error())
-            .with_context(|| format!("setting per-check ACL on {}", path.display()));
     }
     Ok(())
 }
@@ -917,23 +509,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn child_environment_excludes_executor_secrets() {
-        let mut command = Command::new("env");
-        command.env("AGENT_API_KEY", "agent-secret");
-        configure_check_process(&mut command, "/tmp", false, 1_500_000_000);
-        command.env("CHECK_TOKEN", "check-secret");
-        let output = command.output().await.unwrap();
-        assert!(output.status.success());
-        let environment = String::from_utf8_lossy(&output.stdout);
-        assert!(!environment
-            .lines()
-            .any(|line| line.starts_with("AGENT_API_KEY=")));
-        assert!(environment
-            .lines()
-            .any(|line| line == "CHECK_TOKEN=check-secret"));
-    }
-
-    #[tokio::test]
     async fn memory_collector_emits_numeric_performance_data() {
         let check = PinglowCheck {
             passive: false,
@@ -958,8 +533,6 @@ mod tests {
             &ExecutorConfig {
                 base_path: "/tmp/pinglow-executor-test".to_owned(),
                 drop_privileges: false,
-                check_uid_base: DEFAULT_CHECK_UID_BASE,
-                check_uid_count: DEFAULT_CHECK_UID_COUNT,
                 timeout: Duration::from_secs(5),
             },
         )
@@ -969,129 +542,5 @@ mod tests {
         assert_ne!(result.status, CheckResultStatus::Pending);
         assert!(result.output.contains("|memory_used_pct="));
         assert!(result.output.contains("memory_available_gib="));
-    }
-
-    #[test]
-    #[ignore = "requires the runner's SETUID capability"]
-    fn check_script_cannot_regain_executor_uid() {
-        let executor_uid = unsafe { libc::geteuid() };
-        let script = format!(
-            "import os, sys\ntry:\n os.setuid({executor_uid})\nexcept PermissionError:\n pass\nelse:\n sys.exit('regained executor uid')"
-        );
-        let mut command = Command::new("python3");
-        configure_check_process(&mut command, "/tmp", true, 1_500_000_000);
-        command.arg("-c").arg(script);
-        let output = command.as_std_mut().output().unwrap();
-        assert!(output.status.success());
-    }
-
-    #[test]
-    fn check_uid_allocation_is_stable_and_unique() {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let base_path =
-            std::env::temp_dir().join(format!("pinglow-check-uids-{}-{nonce}", std::process::id()));
-        fs::create_dir(&base_path).unwrap();
-        let base_path = base_path.to_string_lossy().into_owned();
-        let uid_base = 1_500_000_000;
-
-        let first = allocate_check_uid(&base_path, "disk-check", uid_base, 100).unwrap();
-        assert_eq!(
-            allocate_check_uid(&base_path, "disk-check", uid_base, 100).unwrap(),
-            first
-        );
-        let second = allocate_check_uid(&base_path, "memory-check", uid_base, 100).unwrap();
-        assert_ne!(first, second);
-
-        let map_metadata = fs::metadata(Path::new(&base_path).join(CHECK_UID_MAP_FILE)).unwrap();
-        assert_eq!(map_metadata.permissions().mode() & 0o777, 0o600);
-        fs::remove_dir_all(base_path).unwrap();
-    }
-
-    #[test]
-    fn check_workspace_acl_grants_only_the_named_uid() {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let path =
-            std::env::temp_dir().join(format!("pinglow-check-acl-{}-{nonce}", std::process::id()));
-        fs::create_dir(&path).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
-
-        set_named_user_acl(&path, 1_500_000_000).unwrap();
-
-        let path_cstr = CString::new(path.as_os_str().as_bytes()).unwrap();
-        let mut acl = [0_u8; 44];
-        let acl_len = unsafe {
-            libc::getxattr(
-                path_cstr.as_ptr(),
-                b"system.posix_acl_access\0".as_ptr().cast(),
-                acl.as_mut_ptr().cast(),
-                acl.len(),
-            )
-        };
-        assert_eq!(acl_len, acl.len() as isize);
-        assert_eq!(u32::from_le_bytes(acl[0..4].try_into().unwrap()), 2);
-        assert_eq!(u16::from_le_bytes(acl[14..16].try_into().unwrap()), 0b111);
-        assert_eq!(
-            u32::from_le_bytes(acl[16..20].try_into().unwrap()),
-            1_500_000_000
-        );
-        assert_eq!(u16::from_le_bytes(acl[22..24].try_into().unwrap()), 0);
-
-        fs::remove_dir(path).unwrap();
-    }
-
-    #[test]
-    fn check_uid_range_rejects_root_and_overflow() {
-        assert!(validate_check_uid_range(999, 1).is_err());
-        assert!(validate_check_uid_range(u32::MAX - 1, 2).is_err());
-        assert!(validate_check_uid_range(200_000, 100_000).is_ok());
-    }
-
-    #[test]
-    fn initialization_locks_legacy_workspaces() {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let base_path = std::env::temp_dir().join(format!(
-            "pinglow-legacy-workspace-{}-{nonce}",
-            std::process::id()
-        ));
-        let old_work = base_path.join("check-old/work");
-        fs::create_dir_all(&old_work).unwrap();
-        fs::set_permissions(&old_work, fs::Permissions::from_mode(0o770)).unwrap();
-
-        initialize_check_workspaces(&base_path.to_string_lossy(), true, 1_500_000_000, 100)
-            .unwrap();
-
-        assert_eq!(
-            fs::metadata(&old_work).unwrap().permissions().mode() & 0o777,
-            0o700
-        );
-        fs::remove_dir_all(base_path).unwrap();
-    }
-
-    #[test]
-    fn initialization_fails_closed_when_uid_mapping_is_missing() {
-        let nonce = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let base_path = std::env::temp_dir().join(format!(
-            "pinglow-missing-uid-map-{}-{nonce}",
-            std::process::id()
-        ));
-        fs::create_dir_all(base_path.join("check-disk/work-isolated")).unwrap();
-
-        let error =
-            initialize_check_workspaces(&base_path.to_string_lossy(), true, 1_500_000_000, 100)
-                .unwrap_err();
-        assert!(error.to_string().contains("has no UID mapping"));
-        fs::remove_dir_all(base_path).unwrap();
     }
 }
