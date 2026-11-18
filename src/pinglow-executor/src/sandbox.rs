@@ -529,6 +529,7 @@ fn apply_landlock(check_dir: &Path, work_dir: &Path) -> Result<()> {
         "/etc/localtime",
         "/etc/mime.types",
         "/etc/os-release",
+        "/etc/debian_version",
     ] {
         add_path_rule(&mut ruleset, Path::new(path), AccessFs::ReadFile)?;
     }

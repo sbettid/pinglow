@@ -62,6 +62,9 @@ libc.ptrace.argtypes = [ctypes.c_uint, ctypes.c_int, ctypes.c_void_p, ctypes.c_v
 libc.ptrace.restype = ctypes.c_long
 assert libc.ptrace(0x7fffffff, 0, None, None) == -1
 assert ctypes.get_errno() == errno.EPERM
+if any(line in pathlib.Path('/etc/os-release').read_text().splitlines()
+       for line in ('ID=debian', 'ID=ubuntu')):
+    assert pathlib.Path('/etc/debian_version').read_text()
 work = pathlib.Path(os.environ['HOME'])
 (work / 'writable.txt').write_text('check workspace writable')
 assert b'CapEff:' in pathlib.Path('/proc/self/status').read_bytes()
