@@ -19,10 +19,6 @@ struct AgentConfig {
     execution_timeout_seconds: u64,
     #[serde(default = "default_drop_privileges")]
     drop_privileges: bool,
-    #[serde(default, rename = "checkUidBase")]
-    _legacy_check_uid_base: Option<u32>,
-    #[serde(default, rename = "checkUidCount")]
-    _legacy_check_uid_count: Option<u32>,
 }
 
 fn default_timeout() -> u64 {
@@ -64,9 +60,6 @@ async fn main() -> Result<()> {
     .with_context(|| format!("parsing {config_path}"))?;
 
     validate_config(&config)?;
-    if config._legacy_check_uid_base.is_some() || config._legacy_check_uid_count.is_some() {
-        warn!("Ignoring legacy checkUidBase/checkUidCount settings; script Checks now share the pinglow-check account");
-    }
     initialize_check_workspaces(
         &config.checks_base_path.to_string_lossy(),
         config.drop_privileges,
@@ -243,8 +236,6 @@ mod tests {
             checks_base_path: "/tmp/checks".into(),
             execution_timeout_seconds: 120,
             drop_privileges,
-            _legacy_check_uid_base: None,
-            _legacy_check_uid_count: None,
         }
     }
 
@@ -258,23 +249,6 @@ mod tests {
     fn remote_agents_require_https_and_privilege_drop() {
         assert!(validate_config(&config("https://controller.example", true)).is_ok());
         assert!(validate_config(&config("http://controller.example", true)).is_err());
-    }
-
-    #[test]
-    fn agent_config_ignores_legacy_uid_range_fields() {
-        let parsed: AgentConfig = serde_yaml::from_str(
-            "agentId: nas\n\
-             controllerUrl: https://controller.example\n\
-             apiKeyFile: /etc/pinglow-agent/api-key\n\
-             allowedChecks: [disk]\n\
-             checksBasePath: /var/lib/pinglow-agent/checks\n\
-             checkUidBase: 200000\n\
-             checkUidCount: 100000\n",
-        )
-        .unwrap();
-
-        assert_eq!(parsed._legacy_check_uid_base, Some(200_000));
-        assert_eq!(parsed._legacy_check_uid_count, Some(100_000));
     }
 
     #[test]
