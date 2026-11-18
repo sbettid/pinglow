@@ -1,3 +1,4 @@
+# Local logging label; target queues come from the API-key binding's agent_targets.
 agentId: nas
 controllerUrl: https://pinglow.example.net
 apiKeyFile: /etc/pinglow-agent/api-key
