@@ -31,7 +31,7 @@ An agent can be authorized for both its own target and shared groups. The `agent
 
 ## Install on Linux
 
-Before installing, create the agent's `ApiKeyBinding` in the Pinglow namespace and make sure the host can reach the controller over HTTPS. You will need `kubectl` configured for that cluster, `curl`, `tar`, `sha256sum`, `sudo`, and `systemd`. Install your distribution's `acl` package if `setfacl` is not already available.
+Before installing, create the agent's `ApiKeyBinding` and make sure the host can reach the controller over HTTPS. Have the binding's API key available to enter during installation. You will need `curl`, `tar`, `sha256sum`, `sudo`, and `systemd`; installation does not require `kubectl` or cluster access. Install your distribution's `acl` package if `setfacl` is not already available.
 
 ### 1. Download and verify the release
 
@@ -66,9 +66,9 @@ From the extracted archive directory, run:
 bash ./install-agent.sh
 ```
 
-The script uses the current user's `kubectl` credentials to read the API-key Secret, then uses `sudo` to create the service accounts, install the binaries and systemd unit, write the key with restrictive permissions and an ACL for `pinglow-agent`, and enable and start the service. On a first install, it prompts for the agent ID, controller URL, allowed Check names, Kubernetes namespace, and Secret name. The default namespace is `pinglow`; the default Secret name is `<agent-id>-agent-api-key`, matching an `ApiKeyBinding` named `<agent-id>-agent`. Review the prompts and ensure the allowed names match Checks authorized for that agent.
+The script prompts for the API key without echoing it, then uses `sudo` to create the service accounts, install the binaries and systemd unit, write the key with restrictive permissions and an ACL for `pinglow-agent`, and enable and start the service. It does not call `kubectl` or connect to the cluster. On a first install, it also prompts for the agent ID, controller URL, and allowed Check names. Review the prompts and ensure the allowed names match Checks authorized for that agent.
 
-On subsequent runs the script preserves the existing agent configuration, refreshes the API key from the Secret you specify, and updates the binaries and service. It does not modify existing service accounts. To change the agent configuration, edit `/etc/pinglow-agent/agent.yaml` yourself.
+On subsequent runs the script preserves the existing agent configuration, prompts for the API key again, and updates the binaries and service. It does not modify existing service accounts. To change the agent configuration, edit `/etc/pinglow-agent/agent.yaml` yourself.
 
 ### 3. Manual installation
 
@@ -96,13 +96,14 @@ EOF
 
 #### Configure the API key and agent
 
-Write the API key from the Kubernetes Secret to `/etc/pinglow-agent/api-key` with owner `root:root` and mode `0600`, then grant read access only to the agent service account with an ACL:
+Enter the API key without echoing it, write it to `/etc/pinglow-agent/api-key` with owner `root:root` and mode `0600`, then grant read access only to the agent service account with an ACL:
 
 ```bash
-set -o pipefail
-kubectl get secret nas-agent-api-key -n pinglow \
-  -o jsonpath='{.data.API_KEY}' | base64 --decode \
-  | sudo -A install -o root -g root -m 0600 /dev/stdin /etc/pinglow-agent/api-key
+read -r -s -p "Agent API key: " API_KEY
+printf '\n'
+printf '%s' "$API_KEY" | sudo -A install -o root -g root -m 0600 \
+  /dev/stdin /etc/pinglow-agent/api-key
+unset API_KEY
 sudo -A setfacl -m u:pinglow-agent:r /etc/pinglow-agent/api-key
 ```
 

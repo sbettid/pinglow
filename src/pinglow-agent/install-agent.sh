@@ -17,7 +17,7 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 }
 
-for command in base64 cut getent install kubectl mktemp setfacl sudo systemctl useradd; do
+for command in cut getent install mktemp setfacl sudo systemctl useradd; do
   require_command "$command"
 done
 
@@ -25,7 +25,8 @@ for asset in pinglow-agent pinglow-check-launcher pinglow-agent.service agent.ex
   [[ -f "$SCRIPT_DIR/$asset" ]] || die "release archive is missing $asset"
 done
 
-[[ "$EUID" -ne 0 ]] || die "run this script as your regular user so kubectl uses your credentials"
+[[ "$EUID" -ne 0 ]] || die "run this script as your regular user, not as root"
+[[ -t 0 ]] || die "run this installer interactively to enter configuration and the API key securely"
 
 first_install=false
 if [[ -e "$CONFIG_PATH" || -L "$CONFIG_PATH" ]]; then
@@ -53,21 +54,6 @@ else
   done
 fi
 
-read -r -p "Kubernetes namespace [pinglow]: " namespace
-namespace="${namespace:-pinglow}"
-[[ "$namespace" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || die "invalid Kubernetes namespace"
-
-if [[ "$first_install" == true ]]; then
-  default_secret="${agent_id}-agent-api-key"
-else
-  default_secret=""
-fi
-read -r -p "API-key Secret name${default_secret:+ [$default_secret]}: " secret_name
-secret_name="${secret_name:-$default_secret}"
-[[ "$secret_name" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || die "invalid Kubernetes Secret name"
-
-sudo -A -v
-
 tmp_key="$(mktemp)"
 tmp_config=""
 cleanup() {
@@ -78,10 +64,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-kubectl get secret "$secret_name" -n "$namespace" \
-  -o go-template='{{index .data "API_KEY"}}' | base64 --decode > "$tmp_key" \
-  || die "could not read and decode API_KEY from Secret $namespace/$secret_name"
-[[ -s "$tmp_key" ]] || die "Secret $namespace/$secret_name has an empty API_KEY"
+read -r -s -p "Agent API key: " api_key || die "could not read the API key"
+printf '\n'
+[[ -n "$api_key" ]] || die "API key must not be empty"
+printf '%s' "$api_key" > "$tmp_key"
+unset api_key
+[[ -s "$tmp_key" ]] || die "API key input was empty"
+
+sudo -A -v
 
 yaml_quote() {
   local value="$1"
