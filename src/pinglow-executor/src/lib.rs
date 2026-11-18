@@ -73,10 +73,23 @@ async fn execute_script(
         vec![
             "-m".into(),
             "venv".into(),
+            "--without-pip".into(),
             venv_path.clone().into_os_string(),
         ],
     )?;
     ensure_success(command, "creating Python virtual environment").await?;
+
+    let command = check_command(
+        &sandbox,
+        venv_path.join("bin/python").as_os_str(),
+        vec![
+            "-m".into(),
+            "ensurepip".into(),
+            "--upgrade".into(),
+            "--default-pip".into(),
+        ],
+    )?;
+    ensure_success(command, "installing pip in Python virtual environment").await?;
 
     if let Some(requirements) = script.python_requirements {
         if !requirements.is_empty() {
