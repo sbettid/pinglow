@@ -21,6 +21,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      - name: Validate agent installer shell syntax
+        run: bash -n src/pinglow-agent/install-agent.sh
+
       - name: Install Rust with target
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -308,6 +311,7 @@ jobs:
             cp "release-assets/agent/$arch/pinglow-agent" "$stage/"
             cp "release-assets/agent/$arch/pinglow-check-launcher" "$stage/"
             cp src/pinglow-agent/agent.example.yaml "$stage/agent.example.yaml"
+            cp src/pinglow-agent/install-agent.sh "$stage/"
             cp docs/static/downloads/pinglow-agent.service "$stage/"
             cp docs/docs/deployment/agent.md "$stage/INSTALL.md"
             tar -C "$stage" -czf "release-assets/packages/pinglow-agent-${VERSION}-linux-${arch}.tar.gz" .

@@ -31,7 +31,7 @@ An agent can be authorized for both its own target and shared groups. The `agent
 
 ## Install on Linux
 
-Before installing, create the agent's `ApiKeyBinding` in the Pinglow namespace and make sure the host can reach the controller over HTTPS. You will need `kubectl` configured for that cluster, `curl`, `tar`, and `sha256sum`. Install your distribution's `acl` package if `setfacl` is not already available.
+Before installing, create the agent's `ApiKeyBinding` in the Pinglow namespace and make sure the host can reach the controller over HTTPS. You will need `kubectl` configured for that cluster, `curl`, `tar`, `sha256sum`, `sudo`, and `systemd`. Install your distribution's `acl` package if `setfacl` is not already available.
 
 ### 1. Download and verify the release
 
@@ -56,14 +56,30 @@ sha256sum --check --ignore-missing SHA256SUMS
 tar -xzf "$ARCHIVE"
 ```
 
-The archive contains the agent binary, Check sandbox launcher, example configuration, systemd unit, and a copy of these installation instructions.
+The archive contains the agent binary, Check sandbox launcher, example configuration, interactive installer, systemd unit, and a copy of these installation instructions.
 
-### 2. Install the service
+### 2. Install with the bundled script
 
-From the extracted archive directory, run this once to create the service account and install the files:
+From the extracted archive directory, run:
 
 ```bash
-sudo bash -eu <<'EOF'
+bash ./install-agent.sh
+```
+
+The script uses the current user's `kubectl` credentials to read the API-key Secret, then uses `sudo` to create the service accounts, install the binaries and systemd unit, write the key with restrictive permissions and an ACL for `pinglow-agent`, and enable and start the service. On a first install, it prompts for the agent ID, controller URL, allowed Check names, Kubernetes namespace, and Secret name. The default namespace is `pinglow`; the default Secret name is `<agent-id>-agent-api-key`, matching an `ApiKeyBinding` named `<agent-id>-agent`. Review the prompts and ensure the allowed names match Checks authorized for that agent.
+
+On subsequent runs the script preserves the existing agent configuration, refreshes the API key from the Secret you specify, and updates the binaries and service. It does not modify existing service accounts. To change the agent configuration, edit `/etc/pinglow-agent/agent.yaml` yourself.
+
+### 3. Manual installation
+
+If you prefer not to use the installer, or need to adapt the process for your distribution, follow these steps from the extracted archive directory.
+
+#### Create accounts and install files
+
+Create the service and Check accounts, then install the binaries, example configuration, and systemd unit:
+
+```bash
+sudo -A bash -eu <<'EOF'
 useradd -r -U -d /var/lib/pinglow-agent -s /usr/sbin/nologin -m pinglow-agent
 useradd -r -U -M -d /nonexistent -s /usr/sbin/nologin pinglow-check
 install -d -o root -g pinglow-agent -m 0750 /etc/pinglow-agent
@@ -78,17 +94,16 @@ install -o root -g root -m 0644 pinglow-agent.service \
 EOF
 ```
 
-### 3. Configure the API key and agent
+#### Configure the API key and agent
 
 Write the API key from the Kubernetes Secret to `/etc/pinglow-agent/api-key` with owner `root:root` and mode `0600`, then grant read access only to the agent service account with an ACL:
 
 ```bash
+set -o pipefail
 kubectl get secret nas-agent-api-key -n pinglow \
   -o jsonpath='{.data.API_KEY}' | base64 --decode \
-  | sudo tee /etc/pinglow-agent/api-key >/dev/null
-sudo chown root:root /etc/pinglow-agent/api-key
-sudo chmod 0600 /etc/pinglow-agent/api-key
-sudo setfacl -m u:pinglow-agent:r /etc/pinglow-agent/api-key
+  | sudo -A install -o root -g root -m 0600 /dev/stdin /etc/pinglow-agent/api-key
+sudo -A setfacl -m u:pinglow-agent:r /etc/pinglow-agent/api-key
 ```
 
 Do not put the key in the YAML file or command-line arguments. The ACL keeps the key unavailable to Check subprocesses.
@@ -106,7 +121,19 @@ checksBasePath: /var/lib/pinglow-agent/checks
 executionTimeoutSeconds: 120
 ```
 
-Replace `controllerUrl` with the HTTPS URL reachable from this host. Set `allowedChecks` to the exact names of the Checks this host is approved to run. Each Check must also use `runOn: agent/<target>`, where `<target>` is listed in this agent's `ApiKeyBinding`.
+#### Start and check the service
+
+Use the systemd unit from the release archive, review it for your distribution, then enable it:
+
+```bash
+sudo -A systemctl daemon-reload
+sudo -A systemctl enable --now pinglow-agent
+sudo -A journalctl -u pinglow-agent -f
+```
+
+### 4. Runtime and security requirements (both methods)
+
+For either installation method, use the HTTPS controller URL reachable from this host, and allow only the exact Check names approved for it. Each Check must also use `runOn: agent/<target>`, where `<target>` is listed in this agent's `ApiKeyBinding`.
 
 Keep `dropPrivileges` enabled (the default) in service deployments. Each script Check runs as the dedicated `pinglow-check` account, distinct from `pinglow-agent`; all supplementary groups and capabilities are cleared. The service unit needs only `CAP_SETUID` and `CAP_SETGID` to switch to that account. The same account is reused for every Check, while each execution receives its own Landlock domain and private writable workspace, so no UID range or per-Check account allocation is needed.
 
@@ -114,19 +141,10 @@ Landlock ABI v6 is required; the agent fails closed at startup if the host kerne
 
 The agent's API key is read only by the agent process. Script subprocesses receive only the secrets explicitly configured for their Check; Landlock and the distinct UID prevent them from reading the agent's environment or files, and per-process `/proc` restrictions prevent reading another Check's environment. Landlock ABI v6 scopes signals and abstract Unix sockets; pathname Unix-socket connections still follow the host's normal DAC permissions, so do not make sensitive sockets accessible to `pinglow-check`. Because monitoring checks need outbound networking, Landlock does not filter destination IPs; block cloud metadata and other credential endpoints with the host firewall or network policy. Disabling privilege dropping is intended only for localhost development; Landlock and environment clearing still apply, but the script runs under the developer's UID. Do not use that setting for a production host.
 
-### 4. Start and check the service
-
-Use the systemd unit from the release archive, review it for your distribution, then enable it:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now pinglow-agent
-sudo journalctl -u pinglow-agent -f
-```
-
 The <a href={useBaseUrl('/downloads/pinglow-agent.service')} download>systemd unit is available to download</a>. It is also included in each agent release archive. The service runs as `pinglow-agent`, not root. Its unit grants only `CAP_SETUID` and `CAP_SETGID`; each script subprocess uses `pinglow-check` with no capabilities, supplementary groups, or inherited non-standard file descriptors. Workspaces use POSIX ACLs and Landlock; built-in collectors run in the agent process. Grant additional host data access narrowly with ACLs; do not run the agent as root to make a check pass.
 
 On upgrade from the per-Check UID design, the agent leaves old `work` and `work-isolated` data untouched but locks those directories down. Script Checks use a fresh `work-sandboxed` directory, so Python requirements may be downloaded again. No manual deletion or UID mapping migration is required.
+
 Existing `checkUidBase` and `checkUidCount` entries in `agent.yaml` are accepted but ignored; remove them when convenient.
 
 The allowlist is an explicit host-owner approval boundary, not a sandbox. An allowlisted script can execute code as its Check's unprivileged UID and may receive that Check's referenced secrets. Review changes to allowed Checks and rotate the API key by updating the binding and the host's key file.
