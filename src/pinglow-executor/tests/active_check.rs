@@ -65,6 +65,12 @@ assert ctypes.get_errno() == errno.EPERM
 work = pathlib.Path(os.environ['HOME'])
 (work / 'writable.txt').write_text('check workspace writable')
 assert b'CapEff:' in pathlib.Path('/proc/self/status').read_bytes()
+for protected_file in ('/etc/passwd', '/etc/group'):
+    try:
+        pathlib.Path(protected_file).read_text()
+        raise AssertionError(f'read {{protected_file}}')
+    except PermissionError:
+        pass
 try:
     pathlib.Path({sibling_secret:?}).read_text()
     raise AssertionError('read sibling check workspace')

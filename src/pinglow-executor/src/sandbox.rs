@@ -525,8 +525,6 @@ fn apply_landlock(check_dir: &Path, work_dir: &Path) -> Result<()> {
         "/etc/hosts",
         "/etc/resolv.conf",
         "/etc/nsswitch.conf",
-        "/etc/passwd",
-        "/etc/group",
         "/etc/ld.so.cache",
         "/etc/localtime",
         "/etc/mime.types",
