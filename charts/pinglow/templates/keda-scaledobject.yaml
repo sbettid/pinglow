@@ -4,6 +4,7 @@ apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
   name: {{ .Release.Name }}-runner-scaler
+  namespace: {{ include "pinglow.runner.namespace" . }}
   labels:
     app: {{ .Release.Name }}-runner
 spec:
@@ -33,6 +34,7 @@ spec:
       metadata:
         # Redis connection
         address: redis.{{ .Release.Namespace }}.svc.cluster.local:6379
+        username: pinglow-runner
         stream: pinglow:checks
         consumerGroup: workers
         # Pending messages threshold
@@ -45,11 +47,12 @@ apiVersion: keda.sh/v1alpha1
 kind: TriggerAuthentication
 metadata:
   name: {{ .Release.Name }}-redis-auth
+  namespace: {{ include "pinglow.runner.namespace" . }}
   labels:
     app: {{ .Release.Name }}-runner
 spec:
   secretTargetRef:
     - parameter: password
-      name: {{ include "pinglow.redis.secretName" . }}
+      name: {{ include "pinglow.runner.redis.secretName" . }}
       key: REDIS_PASSWORD
 {{- end }}

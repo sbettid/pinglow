@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ .Release.Name }}-runner
+  namespace: {{ include "pinglow.runner.namespace" . }}
 spec:
   replicas: {{ .Values.runner.minReplicas }}
   selector:
@@ -12,6 +13,7 @@ spec:
       labels:
         app: {{ .Release.Name }}-runner
     spec:
+      serviceAccountName: {{ include "pinglow.runner.serviceAccountName" . }}
       automountServiceAccountToken: false
       securityContext:
         fsGroup: 10000
@@ -37,13 +39,15 @@ spec:
               mountPath: /home/pinglow-runner
               readOnly: false
           env:
+            - name: REDIS_USERNAME
+              value: "pinglow-runner"
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "pinglow.redis.secretName" . }}
+                  name: {{ include "pinglow.runner.redis.secretName" . }}
                   key: REDIS_PASSWORD
             - name: REDIS_HOST
-              value: "redis"
+              value: "redis.{{ .Release.Namespace }}.svc.cluster.local"
             - name: RUNNER_NAME
               valueFrom:
                 fieldRef:

@@ -1,10 +1,7 @@
 use std::time::Duration;
 
 use log::{debug, error, info, warn};
-use pinglow_common::{
-    error::SerializeError,
-    redis::{init_streams, redis_client},
-};
+use pinglow_common::{error::SerializeError, redis::redis_client};
 use redis::AsyncConnectionConfig;
 use tokio_util::sync::CancellationToken;
 
@@ -16,12 +13,6 @@ use crate::{
 
 pub async fn run() -> anyhow::Result<()> {
     let redis_client = redis_client()?;
-
-    // Init streams (short-lived connection)
-    {
-        let mut conn = redis_client.get_multiplexed_async_connection().await?;
-        init_streams(&mut conn).await;
-    } // conn dropped here
 
     let runner_config = get_config_from_env();
     initialize_check_workspaces(

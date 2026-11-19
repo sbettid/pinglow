@@ -68,12 +68,17 @@ The bundled database is a single instance, intended for development/testing or i
 
 ## 3. Redis
 
-Redis is deployed by the chart. By default the chart generates a password in a Secret named `pinglow-redis-password`. To use your own, create a Secret holding a single key `REDIS_PASSWORD` and reference it:
+Redis is deployed by the chart with separate Redis ACL users for the controller and runners. The controller Secret has `REDIS_PASSWORD`; the runner Secret has a different `REDIS_PASSWORD` and must exist in both the controller and runner namespaces. By default, the chart generates both passwords and creates these Secrets. To manage the passwords yourself, create the Secrets and configure their names:
 
 ```yaml
 redis:
   secretName: "my-redis-secret"
+runner:
+  redis:
+    secretName: "my-runner-redis-secret"
 ```
+
+`my-redis-secret` must be in the controller namespace. `my-runner-redis-secret` must be in both namespaces, with the same runner-only password in each copy. The chart does not copy externally managed Secrets between namespaces. If using Sealed Secrets, create a sealed resource for each namespace; strict-scoped ciphertext cannot be reused across namespaces.
 
 The chart's optional agent gateway Service is an internal `ClusterIP`; the chart does not expose it through an Ingress or LoadBalancer. To connect a remote host, configure a private HTTPS route to the controller API (for example over a VPN). Never expose Redis to the agent network.
 
