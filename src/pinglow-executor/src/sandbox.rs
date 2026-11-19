@@ -12,10 +12,6 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context, Result};
-use landlock::{
-    Access, AccessFs, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset, RulesetAttr,
-    RulesetCreatedAttr, Scope, ABI,
-};
 use nix::unistd::User;
 use tokio::process::Command;
 
@@ -23,7 +19,6 @@ pub const CHECK_USER_NAME: &str = "pinglow-check";
 const WORK_DIR_NAME: &str = "work-sandboxed";
 const LEGACY_WORK_DIR_NAMES: [&str; 2] = ["work", "work-isolated"];
 const CHECK_LAUNCHER_NAME: &str = "pinglow-check-launcher";
-const LANDLOCK_ABI: ABI = ABI::V6;
 const CHECK_PATH: &str = "/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin";
 #[cfg(target_arch = "x86_64")]
 const SECCOMP_AUDIT_ARCH: u32 = 0xc000_003e;
@@ -47,7 +42,6 @@ pub(crate) struct CheckIdentity {
 }
 
 pub fn initialize_check_workspaces(base_path: &str, drop_privileges: bool) -> Result<()> {
-    validate_landlock_support()?;
     find_check_launcher()?;
     if !drop_privileges {
         return Ok(());
@@ -165,17 +159,9 @@ pub(crate) fn check_command(
     args: impl IntoIterator<Item = OsString>,
 ) -> Result<Command> {
     let helper = find_check_launcher()?;
-    let check_dir = fs::canonicalize(&sandbox.check_dir)
-        .with_context(|| format!("resolving {}", sandbox.check_dir.display()))?;
     let work_dir = fs::canonicalize(&sandbox.work_dir)
         .with_context(|| format!("resolving {}", sandbox.work_dir.display()))?;
-
     let mut command = Command::new(helper);
-    command
-        .arg("--check-dir")
-        .arg(check_dir)
-        .arg("--work-dir")
-        .arg(&work_dir);
     if let Some(identity) = sandbox.identity {
         command
             .arg("--drop-privileges")
@@ -244,41 +230,11 @@ fn resolve_check_identity() -> Result<CheckIdentity> {
     })
 }
 
-fn validate_landlock_support() -> Result<()> {
-    build_landlock_ruleset().context("Landlock ABI v6 is required to run Checks securely")?;
-    Ok(())
-}
-
-fn build_landlock_ruleset() -> Result<landlock::RulesetCreated> {
-    Ok(Ruleset::default()
-        .set_compatibility(CompatLevel::HardRequirement)
-        .handle_access(AccessFs::from_all(LANDLOCK_ABI))
-        .context("handling required Landlock filesystem rights")?
-        .scope(Scope::from_all(LANDLOCK_ABI))
-        .context("handling required Landlock scopes")?
-        .create()
-        .context("creating Landlock ruleset")?)
-}
-
 pub fn run_sandbox_launcher() -> Result<()> {
     let mut args = std::env::args_os().skip(1);
-    let mut check_dir = None;
-    let mut work_dir = None;
     let mut identity = None;
     loop {
         match args.next().as_deref() {
-            Some(value) if value == OsStr::new("--check-dir") => {
-                check_dir = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| anyhow!("missing Check directory"))?,
-                ));
-            }
-            Some(value) if value == OsStr::new("--work-dir") => {
-                work_dir = Some(PathBuf::from(
-                    args.next()
-                        .ok_or_else(|| anyhow!("missing Check work directory"))?,
-                ));
-            }
             Some(value) if value == OsStr::new("--drop-privileges") => {
                 let uid = parse_id(args.next(), "UID")?;
                 let gid = parse_id(args.next(), "GID")?;
@@ -291,8 +247,6 @@ pub fn run_sandbox_launcher() -> Result<()> {
         }
     }
 
-    let check_dir = check_dir.ok_or_else(|| anyhow!("missing Check directory"))?;
-    let work_dir = work_dir.ok_or_else(|| anyhow!("missing Check work directory"))?;
     let program = args
         .next()
         .ok_or_else(|| anyhow!("missing Check command"))?;
@@ -304,7 +258,6 @@ pub fn run_sandbox_launcher() -> Result<()> {
     clear_capabilities()?;
     set_no_new_privileges()?;
     deny_process_inspection()?;
-    apply_landlock(&check_dir, &work_dir)?;
 
     let error = StdCommand::new(program).args(args).exec();
     Err(error).context("executing Check command")
@@ -474,93 +427,6 @@ fn deny_process_inspection() -> Result<()> {
         return Err(std::io::Error::last_os_error())
             .context("blocking cross-process inspection syscalls");
     }
-    Ok(())
-}
-
-fn apply_landlock(check_dir: &Path, work_dir: &Path) -> Result<()> {
-    let read_access = AccessFs::ReadFile | AccessFs::ReadDir | AccessFs::Execute;
-    let write_access = AccessFs::WriteFile
-        | AccessFs::RemoveDir
-        | AccessFs::RemoveFile
-        | AccessFs::MakeDir
-        | AccessFs::MakeReg
-        | AccessFs::MakeFifo
-        | AccessFs::MakeSym
-        | AccessFs::Refer
-        | AccessFs::Truncate
-        | AccessFs::Execute
-        | AccessFs::ReadFile
-        | AccessFs::ReadDir;
-
-    let mut ruleset = build_landlock_ruleset()?;
-    for path in [
-        "/usr",
-        "/bin",
-        "/sbin",
-        "/lib",
-        "/lib64",
-        "/etc/ssl/certs",
-        "/etc/pki/ca-trust",
-        "/etc/pki/tls/certs",
-        "/etc/ca-certificates",
-        "/sys",
-    ] {
-        add_path_rule(&mut ruleset, Path::new(path), read_access)?;
-    }
-    add_path_rule(
-        &mut ruleset,
-        Path::new("/proc/self"),
-        AccessFs::ReadFile | AccessFs::ReadDir,
-    )?;
-    for path in [
-        "/proc/cpuinfo",
-        "/proc/loadavg",
-        "/proc/meminfo",
-        "/proc/stat",
-        "/proc/uptime",
-    ] {
-        add_path_rule(&mut ruleset, Path::new(path), AccessFs::ReadFile)?;
-    }
-    for path in [
-        "/etc/hosts",
-        "/etc/resolv.conf",
-        "/etc/nsswitch.conf",
-        "/etc/ld.so.cache",
-        "/etc/localtime",
-        "/etc/mime.types",
-        "/etc/os-release",
-        "/etc/debian_version",
-    ] {
-        add_path_rule(&mut ruleset, Path::new(path), AccessFs::ReadFile)?;
-    }
-    for path in ["/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"] {
-        add_path_rule(
-            &mut ruleset,
-            Path::new(path),
-            AccessFs::ReadFile | AccessFs::WriteFile,
-        )?;
-    }
-    add_path_rule(&mut ruleset, check_dir, read_access)?;
-    add_path_rule(&mut ruleset, work_dir, write_access)?;
-    ruleset
-        .restrict_self()
-        .context("applying Check Landlock restrictions")?;
-    Ok(())
-}
-
-fn add_path_rule(
-    ruleset: &mut landlock::RulesetCreated,
-    path: &Path,
-    access: impl Into<landlock::BitFlags<AccessFs>>,
-) -> Result<()> {
-    if !path.exists() {
-        return Ok(());
-    }
-    let path_fd =
-        PathFd::new(path).with_context(|| format!("opening Landlock path {}", path.display()))?;
-    let _ = ruleset
-        .add_rule(PathBeneath::new(path_fd, access))
-        .with_context(|| format!("adding Landlock rule for {}", path.display()))?;
     Ok(())
 }
 
@@ -745,10 +611,5 @@ mod tests {
             0o700
         );
         fs::remove_dir(path).unwrap();
-    }
-
-    #[test]
-    fn landlock_v6_is_available_and_enforced() {
-        validate_landlock_support().unwrap();
     }
 }
