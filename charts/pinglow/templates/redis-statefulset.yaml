@@ -14,25 +14,62 @@ spec:
       labels:
         app: redis
     spec:
-      containers:
-        - name: redis
+      initContainers:
+        - name: configure-acl
           image: redis:8-alpine
+          command: ["/bin/sh", "-ec"]
           args:
-            - "--requirepass"
-            - "$(REDIS_PASSWORD)"
-            - "--appendonly"
-            - "yes"
+            - |
+              umask 077
+              if [ "$REDIS_CONTROLLER_PASSWORD" = "$REDIS_RUNNER_PASSWORD" ]; then
+                echo "controller and runner Redis passwords must be different" >&2
+                exit 1
+              fi
+              controller_password_hash="$(printf '%s' "$REDIS_CONTROLLER_PASSWORD" | sha256sum | cut -d ' ' -f 1)"
+              runner_password_hash="$(printf '%s' "$REDIS_RUNNER_PASSWORD" | sha256sum | cut -d ' ' -f 1)"
+              {
+                printf 'user default off\n'
+                printf 'user pinglow-controller on #%s ~* +@all\n' "$controller_password_hash"
+                printf 'user pinglow-runner on #%s +client|setinfo (~pinglow:checks +xreadgroup +xautoclaim +xack +xpending) (~pinglow:results +xadd)\n' "$runner_password_hash"
+              } > /acl/users.acl
+              chmod 0444 /acl/users.acl
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: false
+            runAsUser: 0
           env:
-            - name: REDIS_PASSWORD
+            - name: REDIS_CONTROLLER_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "pinglow.redis.secretName" . }}
                   key: REDIS_PASSWORD
+            - name: REDIS_RUNNER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pinglow.runner.redis.secretName" . }}
+                  key: REDIS_PASSWORD
+          volumeMounts:
+            - name: redis-acl
+              mountPath: /acl
+      containers:
+        - name: redis
+          image: redis:8-alpine
+          args:
+            - "--aclfile"
+            - "/etc/redis/users.acl"
+            - "--appendonly"
+            - "yes"
           ports:
             - containerPort: 6379
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: redis-acl
+              mountPath: /etc/redis
+              readOnly: true
           resources:
             requests:
               cpu: "100m"
@@ -40,6 +77,13 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
+      volumes:
+        - name: redis-acl
+          emptyDir: {}
+        {{ if not .Values.redis.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{ end }}
   {{- if .Values.redis.persistence.enabled }}
   volumeClaimTemplates:
     - metadata:
@@ -49,10 +93,6 @@ spec:
         resources:
           requests:
             storage: {{ .Values.redis.persistence.size }}
-  {{- else }}
-      volumes:
-        - name: data
-          emptyDir: {}
   {{- end }}
 ---
 apiVersion: v1

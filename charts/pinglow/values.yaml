@@ -27,6 +27,13 @@ pinglow:
 
 # Runner configuration
 runner:
+  # Empty uses <release-name>-runner. Must differ from the release namespace.
+  namespace: ""
+  # Set false when the runner namespace is provisioned outside this chart.
+  createNamespace: true
+  redis:
+    # Distinct runner password; external Secrets must exist in both namespaces.
+    secretName: ""
   minReplicas: 1
   maxReplicas: 10
   # Queue length threshold for scaling

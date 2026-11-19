@@ -16,6 +16,8 @@ The agent gateway is part of the controller API and accesses Redis internally. T
 
 Active Checks choose exactly one execution type: a referenced Script or a typed built-in collector. Both use the shared executor. `runOn` selects the environment: `cluster` (the default) or `agent/<id>`.
 
+The Helm chart deploys cluster runners into a dedicated namespace, separate from the controller and its Kubernetes Secrets. Runners have no Kubernetes API token. Redis remains in the controller namespace and is reached by its service DNS name. Redis ACLs give the controller its own user and give runners a separate user limited to the check and result streams; the runner password is supplied through a Secret in both namespaces. The chart generates distinct passwords and corresponding Secrets when credentials are not externally managed.
+
 Below a diagram depicts the overall architecture: 
 
 ![Pinglow Architecture](/img/pinglow_architecture.svg)

@@ -24,6 +24,9 @@ The runner container starts as UID `0` with only `SETUID` and `SETGID` added and
 
 | Value | Default | Description |
 | --- | --- | --- |
+| `runner.namespace` | `<release-name>-runner` | Dedicated namespace for the runner Deployment and KEDA resources. Must differ from the release namespace. |
+| `runner.createNamespace` | `true` | Create the runner namespace. Set to `false` if it is provisioned separately. |
+| `runner.redis.secretName` | `<release-name>-runner-redis-password` | Runner-only Secret with `REDIS_PASSWORD`, required in both namespaces so Redis can configure its ACL and the runner/KEDA can authenticate. When empty, the chart creates matching Secrets in both namespaces with a distinct password. |
 | `runner.minReplicas` | `1` | Minimum (and, without KEDA, fixed) number of runners. |
 | `runner.maxReplicas` | `10` | Maximum number of runners. |
 | `runner.queueLengthThreshold` | `10` | Number of pending checks in the queue that triggers scaling out. |
@@ -48,7 +51,7 @@ The runner container starts as UID `0` with only `SETUID` and `SETGID` added and
 
 | Value | Default | Description |
 | --- | --- | --- |
-| `redis.secretName` | `""` | Secret with a `REDIS_PASSWORD` key. When empty, the chart generates one named `pinglow-redis-password`. |
+| `redis.secretName` | `""` | Controller Secret with a `REDIS_PASSWORD` key. When empty, the chart generates it as `pinglow-redis-password` by default. The runner has a separate ACL user and password. |
 
 ## Bundled TimescaleDB (`timescaledb`)
 

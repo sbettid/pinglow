@@ -5,7 +5,20 @@ use redis::{Client as RedisClient, RedisError, Value};
 pub fn redis_client() -> Result<RedisClient, RedisError> {
     let host = std::env::var("REDIS_HOST").expect("REDIS_HOST must be set");
     let password = std::env::var("REDIS_PASSWORD").expect("REDIS_PASSWORD must be set");
-    RedisClient::open(format!("redis://:{password}@{host}:6379"))
+    let username = std::env::var("REDIS_USERNAME").ok();
+    RedisClient::open(redis_url(&host, username.as_deref(), &password))
+}
+
+fn redis_url(host: &str, username: Option<&str>, password: &str) -> String {
+    let password = urlencoding::encode(password);
+    match username {
+        Some(username) => format!(
+            "redis://{}:{}@{host}:6379",
+            urlencoding::encode(username),
+            password
+        ),
+        None => format!("redis://:{password}@{host}:6379"),
+    }
 }
 
 pub fn check_stream_for_target(run_on: &str) -> Option<String> {
@@ -93,6 +106,28 @@ pub fn parse_stream_payload(value: Value) -> Option<(String, HashMap<String, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redis_url_supports_acl_credentials_and_reserved_characters() {
+        let client = RedisClient::open(redis_url(
+            "redis.local",
+            Some("pinglow-runner"),
+            "p@ss:/word",
+        ))
+        .unwrap();
+        let credentials = client.get_connection_info().redis_settings();
+
+        assert_eq!(credentials.username(), Some("pinglow-runner"));
+        assert_eq!(credentials.password(), Some("p@ss:/word"));
+    }
+
+    #[test]
+    fn redis_url_keeps_default_user_compatibility() {
+        assert_eq!(
+            redis_url("redis.local", None, "password"),
+            "redis://:password@redis.local:6379"
+        );
+    }
 
     fn bulk(value: &str) -> Value {
         Value::BulkString(value.as_bytes().to_vec())
