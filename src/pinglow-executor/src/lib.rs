@@ -1,33 +1,14 @@
-use std::{
-    collections::BTreeMap,
-    ffi::CString,
-    fs,
-    os::unix::{fs::PermissionsExt, process::CommandExt},
-    process::Stdio,
-    time::Duration,
-};
+use std::{collections::BTreeMap, ffi::CString, fs, process::Stdio, time::Duration};
 
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::Utc;
 use pinglow_common::{BuiltinCollector, CheckResult, CheckResultStatus, PinglowCheck};
 use tokio::{process::Command, time::timeout};
 
-const CHECK_UID: u32 = 65534;
-const LINUX_CAPABILITY_VERSION_3: u32 = 0x20080522;
+mod sandbox;
 
-#[repr(C)]
-struct CapHeader {
-    version: u32,
-    pid: libc::pid_t,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct CapData {
-    effective: u32,
-    permitted: u32,
-    inheritable: u32,
-}
+use sandbox::{check_command, prepare_check_sandbox, write_check_script};
+pub use sandbox::{initialize_check_workspaces, run_sandbox_launcher, CHECK_USER_NAME};
 
 #[derive(Clone, Debug)]
 pub struct ExecutorConfig {
@@ -82,40 +63,36 @@ async fn execute_script(
     secrets: Option<std::collections::HashMap<String, String>>,
     config: &ExecutorConfig,
 ) -> Result<(String, CheckResultStatus)> {
-    let check_dir = format!("{}/check-{check_name}", config.base_path);
-    let script_path = format!("{check_dir}/script.py");
-    let work_dir = format!("{check_dir}/work");
-    let venv_path = format!("{work_dir}/venv");
+    let sandbox = prepare_check_sandbox(&config.base_path, check_name, config.drop_privileges)?;
+    let script_path = write_check_script(&sandbox, &script.content)?;
+    let venv_path = sandbox.work_dir.join("venv");
 
-    fs::create_dir_all(&config.base_path)?;
-    fs::set_permissions(&config.base_path, fs::Permissions::from_mode(0o750))?;
-    fs::create_dir_all(&check_dir)?;
-    fs::create_dir_all(&work_dir)?;
-    fs::set_permissions(&check_dir, fs::Permissions::from_mode(0o750))?;
-    fs::set_permissions(&work_dir, fs::Permissions::from_mode(0o770))?;
-    fs::write(&script_path, &script.content)?;
-    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o640))?;
-
-    let mut command = Command::new("python3");
-    configure_check_process(&mut command, &work_dir, config.drop_privileges);
-    command.args(["-m", "venv", &venv_path]);
+    let command = check_command(
+        &sandbox,
+        "python3",
+        vec![
+            "-m".into(),
+            "venv".into(),
+            venv_path.clone().into_os_string(),
+        ],
+    )?;
     ensure_success(command, "creating Python virtual environment").await?;
 
     if let Some(requirements) = script.python_requirements {
         if !requirements.is_empty() {
-            let mut command = Command::new(format!("{venv_path}/bin/pip"));
-            configure_check_process(&mut command, &work_dir, config.drop_privileges);
-            command.arg("install").args(requirements);
+            let mut args = vec![std::ffi::OsString::from("install")];
+            args.extend(requirements.into_iter().map(std::ffi::OsString::from));
+            let command = check_command(&sandbox, venv_path.join("bin/pip").as_os_str(), args)?;
             ensure_success(command, "installing Python requirements").await?;
         }
     }
 
-    let mut command = Command::new(format!("{venv_path}/bin/python"));
-    configure_check_process(&mut command, &work_dir, config.drop_privileges);
-    command
-        .arg(script_path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    let mut command = check_command(
+        &sandbox,
+        venv_path.join("bin/python").as_os_str(),
+        vec![script_path.into_os_string()],
+    )?;
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
     if let Some(secrets) = secrets {
         command.envs(secrets);
     }
@@ -150,55 +127,16 @@ async fn ensure_success(mut command: Command, action: &str) -> Result<()> {
         .await
         .with_context(|| format!("{action}"))?;
     if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
         bail!(
-            "Error {action} (status: {}): {}",
+            "Error {action} (status: {}): {}{}",
             output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
+            stdout.trim(),
+            stderr.trim()
         );
     }
     Ok(())
-}
-
-fn configure_check_process(command: &mut Command, work_dir: &str, drop_privileges: bool) {
-    command.env_clear();
-    if let Some(path) = std::env::var_os("PATH") {
-        command.env("PATH", path);
-    }
-    command
-        .env("HOME", work_dir)
-        .env("TMPDIR", work_dir)
-        .kill_on_drop(true);
-
-    if drop_privileges {
-        unsafe {
-            command.as_std_mut().pre_exec(|| {
-                if libc::setuid(CHECK_UID) == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-
-                if libc::prctl(
-                    libc::PR_CAP_AMBIENT,
-                    libc::PR_CAP_AMBIENT_CLEAR_ALL,
-                    0,
-                    0,
-                    0,
-                ) == -1
-                {
-                    return Err(std::io::Error::last_os_error());
-                }
-
-                let header = CapHeader {
-                    version: LINUX_CAPABILITY_VERSION_3,
-                    pid: 0,
-                };
-                let data = [CapData::default(); 2];
-                if libc::syscall(libc::SYS_capset, &header, data.as_ptr()) == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-    }
 }
 
 async fn execute_collector(collector: BuiltinCollector) -> Result<(String, CheckResultStatus)> {
@@ -571,23 +509,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn child_environment_excludes_executor_secrets() {
-        let mut command = Command::new("env");
-        command.env("AGENT_API_KEY", "agent-secret");
-        configure_check_process(&mut command, "/tmp", false);
-        command.env("CHECK_TOKEN", "check-secret");
-        let output = command.output().await.unwrap();
-        assert!(output.status.success());
-        let environment = String::from_utf8_lossy(&output.stdout);
-        assert!(!environment
-            .lines()
-            .any(|line| line.starts_with("AGENT_API_KEY=")));
-        assert!(environment
-            .lines()
-            .any(|line| line == "CHECK_TOKEN=check-secret"));
-    }
-
-    #[tokio::test]
     async fn memory_collector_emits_numeric_performance_data() {
         let check = PinglowCheck {
             passive: false,
@@ -621,19 +542,5 @@ mod tests {
         assert_ne!(result.status, CheckResultStatus::Pending);
         assert!(result.output.contains("|memory_used_pct="));
         assert!(result.output.contains("memory_available_gib="));
-    }
-
-    #[test]
-    #[ignore = "requires the runner's SETUID capability"]
-    fn check_script_cannot_regain_executor_uid() {
-        let executor_uid = unsafe { libc::geteuid() };
-        let script = format!(
-            "import os, sys\ntry:\n os.setuid({executor_uid})\nexcept PermissionError:\n pass\nelse:\n sys.exit('regained executor uid')"
-        );
-        let mut command = Command::new("python3");
-        configure_check_process(&mut command, "/tmp", true);
-        command.arg("-c").arg(script);
-        let output = command.as_std_mut().output().unwrap();
-        assert!(output.status.success());
     }
 }

@@ -21,6 +21,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
 
+      - name: Validate agent installer shell syntax
+        run: bash -n src/pinglow-agent/install-agent.sh
+
       - name: Install Rust with target
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -38,6 +41,9 @@ jobs:
       - name: Build agent with cross
         run: cross build --release --target ${{ matrix.target }} -p pinglow-agent
 
+      - name: Build Check sandbox launcher with cross
+        run: cross build --release --target ${{ matrix.target }} -p pinglow-executor --bin pinglow-check-launcher
+
       - name: Rename binary for Docker build
         run: |
           mkdir -p ./bin/pinglow/${{ matrix.target }}
@@ -46,6 +52,8 @@ jobs:
           cp target/${{ matrix.target }}/release/pinglow ./bin/pinglow/${{ matrix.target }}/
           cp target/${{ matrix.target }}/release/pinglow-runner ./bin/pinglow-runner/${{ matrix.target }}/
           cp target/${{ matrix.target }}/release/pinglow-agent ./bin/pinglow-agent/${{ matrix.target }}/
+          cp target/${{ matrix.target }}/release/pinglow-check-launcher ./bin/pinglow-runner/${{ matrix.target }}/
+          cp target/${{ matrix.target }}/release/pinglow-check-launcher ./bin/pinglow-agent/${{ matrix.target }}/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
@@ -301,7 +309,9 @@ jobs:
             stage="release-assets/stage-$arch"
             mkdir -p "$stage"
             cp "release-assets/agent/$arch/pinglow-agent" "$stage/"
+            cp "release-assets/agent/$arch/pinglow-check-launcher" "$stage/"
             cp src/pinglow-agent/agent.example.yaml "$stage/agent.example.yaml"
+            cp src/pinglow-agent/install-agent.sh "$stage/"
             cp docs/static/downloads/pinglow-agent.service "$stage/"
             cp docs/docs/deployment/agent.md "$stage/INSTALL.md"
             tar -C "$stage" -czf "release-assets/packages/pinglow-agent-${VERSION}-linux-${arch}.tar.gz" .

@@ -33,7 +33,7 @@ spec:
 ```
 
 As we can see, the `Check` references a standard secret and so its keys and values will be automatically passed as environment variables to the script when it runs.
-Scripts run under a separate unprivileged user. Runner credentials are not inherited; only secrets explicitly referenced by that check are passed to its script.
+Each script Check runs under its own unprivileged UID with a private workspace. Runner credentials are not inherited; only secrets explicitly referenced by that check are passed to its script. The UID mapping is persistent, and workspace ACLs prevent one Check from accessing another Check's virtual environment or files.
 
 ```yaml
 apiVersion: pinglow.io/v1alpha1
@@ -163,7 +163,7 @@ resources.
 
 ## Execution targets and scripts
 
-`runOn` defaults to `cluster`. A Check can target an agent with `runOn: agent/nas`. The agent must be configured to allow that Check. Script-based Checks are supported on agents as well as built-in collectors; approving a script means trusting its code to execute as the agent's unprivileged service user. The allowlist is not a sandbox.
+`runOn` defaults to `cluster`. A Check can target an agent with `runOn: agent/nas`. The agent must be configured to allow that Check. Script-based Checks are supported on agents as well as built-in collectors. Approving a script grants its code execution; the allowlist controls placement, not behavior. Deployed script Checks run in a filesystem/process sandbox separate from the service, but outbound networking remains available.
 
 ## Performance data
 

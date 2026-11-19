@@ -247,6 +247,7 @@ echo "Local runner privilege dropping is $RUNNER_DROP_PRIVILEGES."
 echo "Starting the local dev-host agent for the script and built-in collector examples."
 echo "Start the frontend separately with: cd $ROOT_DIR/../pinglow-frontend/client && npm run dev"
 
+cargo build -p pinglow-executor --bin pinglow-check-launcher
 cargo run -p pinglow-runner &
 RUNNER_PID=$!
 cargo run -p pinglow &

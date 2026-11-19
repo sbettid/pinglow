@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use log::{error, info, warn};
 use pinglow_common::{CheckResultStatus, PinglowCheck};
-use pinglow_executor::{execute_check, ExecutorConfig};
+use pinglow_executor::{execute_check, initialize_check_workspaces, ExecutorConfig};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
@@ -60,6 +60,10 @@ async fn main() -> Result<()> {
     .with_context(|| format!("parsing {config_path}"))?;
 
     validate_config(&config)?;
+    initialize_check_workspaces(
+        &config.checks_base_path.to_string_lossy(),
+        config.drop_privileges,
+    )?;
     let api_key = fs::read_to_string(&config.api_key_file)
         .with_context(|| format!("reading API key file {}", config.api_key_file.display()))?
         .trim()
