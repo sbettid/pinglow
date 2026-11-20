@@ -34,8 +34,9 @@ and load collectors against the local machine. Its API key is read from the
 development cluster's generated Secret and written only to a temporary file
 removed when the helper exits. The local agent config disables UID/GID
 switching, as does the local runner, because developer-launched processes do
-not have `CAP_SETUID`/`CAP_SETGID`. Landlock confinement and environment
-clearing still apply. Do not copy those development settings into a deployed
+not have `CAP_SETUID`/`CAP_SETGID`. Environment clearing and the seccomp
+process-inspection filter still apply; Landlock filesystem confinement is
+temporarily disabled. Do not copy those development settings into a deployed
 service.
 The helper uses a temporary kubeconfig for this cluster and does not change the
 current kubectl context. Both local execution components need Python 3 with

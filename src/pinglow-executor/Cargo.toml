@@ -9,7 +9,6 @@ repository.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 libc = "0.2.191"
-landlock.workspace = true
 nix.workspace = true
 pinglow-common = { path = "../common" }
 serde_json.workspace = true
